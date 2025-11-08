@@ -49,8 +49,8 @@ else
     echo
     echo "File: $f"
     echo "  Linux:"
-    echo "    wget \"http://$LOCAL_IP:$PORT/$url_encoded\" -O \"$f\""
-    echo "    curl -L \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
+  echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\""
+  echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\""
     echo
     echo "  Windows (CMD):"
     echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
