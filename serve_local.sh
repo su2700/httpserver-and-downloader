@@ -43,9 +43,10 @@ else
   for f in "${FILES[@]}"; do
     # URL-encode minimal characters for space -> %20 (safe enough for typical filenames)
     # A simple URL-escape for spaces and a few common chars:
-    url_encoded="${f// /%20}"
-    url_encoded="${url_encoded//\#/%%23}"
-    url_encoded="${url_encoded//\%/%%25}"
+    # IMPORTANT: Encode % first to avoid double-encoding!
+    url_encoded="${f//%/%25}"
+    url_encoded="${url_encoded//#/%23}"
+    url_encoded="${url_encoded// /%20}"
     echo
     echo "File: $f"
     echo "  Linux:"
@@ -54,8 +55,8 @@ else
     echo
     echo "  Windows (CMD):"
     echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-    echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" --output \"$f\""
-    echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
+    echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"%CD%\\$f\""
+    echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"%CD%\\$f\""
     echo
     echo "  Windows (PowerShell):"
     echo "    PowerShell -Command \"Invoke-WebRequest -Uri 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
