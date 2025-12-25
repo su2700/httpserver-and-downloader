@@ -98,7 +98,7 @@ else
     elif [[ "$TARGET_OS" == "Windows" ]]; then
       echo "  Windows (CMD):"
       echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-      echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"%CD%\\$f\""
+      echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
       echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"%CD%\\$f\""
       echo
       echo "  Windows (PowerShell):"
