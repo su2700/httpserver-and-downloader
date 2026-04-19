@@ -257,14 +257,14 @@ echo "=============================================="
 echo "Starting server(s)..."
 
 cleanup() {
-  echo "Cleaning up..."
-  # Kill all background jobs started by this script
-  pids=$(jobs -p)
-  if [[ -n "$pids" ]]; then
-    kill $pids 2>/dev/null || true
-    sleep 0.5
-    kill -9 $pids 2>/dev/null || true # Force kill if they didn't stop
-  fi
+  echo -e "\nCleaning up..."
+  # Kill the entire process group started by this script
+  # This ensures all background servers and their children are killed
+  trap - EXIT # Avoid infinite loops
+  kill -TERM -$$ 2>/dev/null || true
+  sleep 0.5
+  kill -KILL -$$ 2>/dev/null || true
+  
   [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
 }
 trap cleanup EXIT
