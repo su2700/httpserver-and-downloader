@@ -240,7 +240,9 @@ echo "Starting server(s)..."
 
 cleanup() {
   echo "Cleaning up..."
+  # Kill background jobs by sending SIGKILL to their process group if possible
   kill $(jobs -p) 2>/dev/null || true
+  # Also handle cases where jobs might have started sub-processes
   [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
 }
 trap cleanup EXIT
@@ -276,6 +278,7 @@ start_ftp() {
   if command -v vsftpd >/dev/null 2>&1; then
     VSFTPD_CONF="/tmp/vsftpd.conf.$$"
     echo "listen=YES
+listen_ipv6=NO
 anonymous_enable=YES
 anon_root=$(pwd)
 no_anon_password=YES
@@ -320,6 +323,22 @@ start_dns() {
     return 1
   fi
 }
+
+# Pre-check: try to free up ports if we are root and have fuser/lsof
+if [[ "$EUID" -eq 0 ]] && command -v fuser >/dev/null 2>&1; then
+  echo "Pre-cleaning ports..."
+  case "$PROTOCOL" in
+    HTTP) fuser -k 80/tcp 2>/dev/null || true ;;
+    SMB)  fuser -k 445/tcp 2>/dev/null || true ;;
+    FTP)  fuser -k 21/tcp 2>/dev/null || true ;;
+    TFTP) fuser -k 69/udp 2>/dev/null || true ;;
+    WebDAV) fuser -k 8080/tcp 2>/dev/null || true ;;
+    DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
+    ALL)
+      fuser -k 80/tcp 445/tcp 21/tcp 69/udp 8080/tcp 53/udp 53/tcp 2>/dev/null || true
+      ;;
+  esac
+fi
 
 case "$PROTOCOL" in
   HTTP)   start_http ;;
