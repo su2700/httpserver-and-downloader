@@ -258,7 +258,13 @@ echo "Starting server(s)..."
 
 cleanup() {
   echo "Cleaning up..."
-  kill $(jobs -p) 2>/dev/null || true
+  # Kill all background jobs started by this script
+  pids=$(jobs -p)
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null || true
+    sleep 0.5
+    kill -9 $pids 2>/dev/null || true # Force kill if they didn't stop
+  fi
   [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
 }
 trap cleanup EXIT
