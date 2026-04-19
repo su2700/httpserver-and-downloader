@@ -13,7 +13,8 @@ A versatile bash script to serve files from your current directory over multiple
   - **Linux**: curl, wget, smbclient, tftp, cadaver, dnscat2.
   - **Windows CMD**: certutil, curl.exe, bitsadmin, copy, tftp, dnscat2.
   - **Windows PowerShell**: Invoke-WebRequest (with TLS 1.2 support), WebClient.
-- 🖥️ **Interactive Interface**: Numbered menus for file selection, target OS, and protocol choice.
+- 🖥️ **Interactive Interface**: Numbered menus for multi-file selection, target OS, and protocol choice.
+- 🔒 **Multi-File Support**: Select multiple files by space/comma-separated numbers or type `all` to select every file in the directory.
 - 🔒 **Windows Hardening**: 
   - **Authenticated SMB**: Bypasses guest access policies using `smbuser`/`smbpass`.
   - **TLS 1.2/1.3 Force**: Ensures PowerShell downloads succeed on modern Windows systems.
@@ -118,7 +119,11 @@ This project is provided as-is for educational and authorized penetration testin
 
 ## Changelog
 
-### Version 1.7 (Current)
+### Version 1.8 (Current)
+- Added **Multi-File Selection** support. Select multiple files via space/comma-separated numbers or `all`.
+- Improved input validation for file selection.
+
+### Version 1.7
 - Added **HTTPS**, **WebDAV**, and **DNS** (dnscat2) support.
 - Added **SMB Authentication** to bypass modern Windows Guest Access policies.
 - Added **Aggressive Cleanup** (Process Group kill) and **Auto Port Pre-cleaning**.

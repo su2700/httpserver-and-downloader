@@ -88,13 +88,41 @@ fi
 SELECTED_FILES=()
 if [[ ${#FILES[@]} -gt 0 ]]; then
   while true; do
-    read -p "Enter number to select file: " selection
-    if [[ "$selection" =~ ^[0-9]+$ ]] && (( selection >= 1 && selection <= ${#FILES[@]} )); then
-      SELECTED_FILES=("${FILES[$((selection-1))]}")
-      echo "Selected: ${SELECTED_FILES[0]}"
+    read -p "Enter number(s) to select files (e.g., 1 2 5 or 'all'): " selection
+    if [[ "$selection" == "all" ]]; then
+      SELECTED_FILES=("${FILES[@]}")
+      echo "Selected all files."
       break
     fi
-    echo "Invalid selection. Please enter a number between 1 and ${#FILES[@]}."
+    # Split by spaces or commas
+    IFS=', ' read -ra ADDR <<< "$selection"
+    TEMP_SELECTED=()
+    VALID=true
+    for i in "${ADDR[@]}"; do
+      if [[ "$i" =~ ^[0-9]+$ ]] && (( i >= 1 && i <= ${#FILES[@]} )); then
+        # Check if already selected to avoid duplicates
+        DUPE=false
+        for s in "${TEMP_SELECTED[@]}"; do
+          if [[ "$s" == "${FILES[$((i-1))]}" ]]; then
+            DUPE=true
+            break
+          fi
+        done
+        if [[ "$DUPE" == "false" ]]; then
+          TEMP_SELECTED+=("${FILES[$((i-1))]}")
+        fi
+      else
+        echo "Invalid selection: $i"
+        VALID=false
+        break
+      fi
+    done
+    if [[ "$VALID" == "true" ]] && [[ ${#TEMP_SELECTED[@]} -gt 0 ]]; then
+      SELECTED_FILES=("${TEMP_SELECTED[@]}")
+      echo "Selected: ${SELECTED_FILES[*]}"
+      break
+    fi
+    echo "Please enter a valid list of numbers between 1 and ${#FILES[@]}."
   done
   echo
 fi
@@ -356,22 +384,22 @@ start_dns() {
   fi
 }
 
-# Pre-check: try to free up ports if we are root and have fuser/lsof
-if [[ "$EUID" -eq 0 ]] && command -v fuser >/dev/null 2>&1; then
-  echo "Pre-cleaning ports..."
+# Pre-check: try to free up ports if fuser is available
+if command -v fuser >/dev/null 2>&1; then
+  echo "Checking and cleaning target ports..."
   case "$PROTOCOL" in
-    HTTP) fuser -k 80/tcp 2>/dev/null || true ;;
-    HTTPS) fuser -k 443/tcp 2>/dev/null || true ;;
+    HTTP) fuser -k "$PORT/tcp" 2>/dev/null || true ;;
+    HTTPS) fuser -k "$HTTPS_PORT/tcp" 2>/dev/null || true ;;
     SMB)  fuser -k 445/tcp 2>/dev/null || true ;;
     FTP)  fuser -k 21/tcp 2>/dev/null || true ;;
     TFTP) fuser -k 69/udp 2>/dev/null || true ;;
-    WebDAV) fuser -k 8080/tcp 2>/dev/null || true ;;
+    WebDAV) fuser -k "$WEBDAV_PORT/tcp" 2>/dev/null || true ;;
     DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
     ALL)
-      fuser -k 80/tcp 443/tcp 445/tcp 21/tcp 69/udp 8080/tcp 53/udp 53/tcp 2>/dev/null || true
+      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp 21/tcp 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp 2>/dev/null || true
       ;;
   esac
-  sleep 1 # Give the OS a second to release the sockets
+  sleep 0.5 # Give the OS a moment to release the sockets
 fi
 
 case "$PROTOCOL" in
