@@ -4,25 +4,33 @@ A simple bash script to serve files from your current directory over HTTP and ge
 
 ## Features
 
-- 🚀 **Quick HTTP Server**: Serves files using `goshs` (preferred) or `python3` (fallback)
+- 🚀 **Multi-Protocol Servers**: Serves files via HTTP, SMB, FTP, TFTP, WebDAV, or DNS
 - 🔍 **Auto-Detection**: Detects `tun0` by default or prompts for an active network interface
 - 📋 **Download Commands**: Generates ready-to-use download commands for:
-  - Linux (curl, wget)
-  - Windows CMD (certutil, curl, bitsadmin)
+  - Linux (curl, wget, smbclient, tftp, cadaver, dnscat2)
+  - Windows CMD (certutil, curl, bitsadmin, copy, tftp, dnscat2)
   - Windows PowerShell (Invoke-WebRequest, WebClient)
 - 🖥️ **Interactive Interface**:
   - Select specific files from a numbered list
   - Choose target OS (Linux/Windows) to filter commands
+  - Choose server protocol (HTTP, SMB, FTP, TFTP, WebDAV, DNS, or ALL)
 - 🔒 **URL Encoding**: Properly handles filenames with spaces, `#`, and `%` characters
 - 🛡️ **Smart Port Binding**: Automatically falls back to port 8000 if port 80 is requested without root privileges
 
 ## Prerequisites
 
 - **goshs** (Optional): A simple HTTP server written in Go
-  ```bash
-  go install github.com/patrickhener/goshs@latest
-  ```
 - **python3** (Fallback): Used if `goshs` is not found
+- **impacket-smbserver** (Optional): SMB server part of Impacket
+- **vsftpd** (Optional): FTP daemon for anonymous access
+- **atftpd** (Optional): TFTP server
+- **rclone** (Optional): Used for WebDAV server (`rclone serve webdav`)
+- **dnscat2** (Optional): Used for DNS server and file transfer
+
+Install dependencies (example for Debian/Kali):
+```bash
+sudo apt install vsftpd atftpd rclone dnscat2 python3-impacket
+```
 
 ## Installation
 
@@ -101,7 +109,25 @@ This project is provided as-is for educational and authorized penetration testin
 
 ## Changelog
 
-### Version 1.2 (Current)
+### Version 1.5 (Current)
+- Added WebDAV support using `rclone`
+- Added DNS support using `dnscat2`
+- Expanded "ALL" option to include 6 different protocols
+- Improved process management and protocol selection logic
+
+### Version 1.4
+- Added FTP server support using `vsftpd` (with anonymous access)
+- Added TFTP server support using `atftpd`
+- Added "ALL" protocol option to start all 4 servers simultaneously
+- Added FTP and TFTP download commands for Windows and Linux
+
+### Version 1.3
+- Added SMB server support using `impacket-smbserver`
+- Added interactive protocol selection (HTTP, SMB, or BOTH)
+- Added SMB download commands for Windows (`copy`) and Linux (`smbclient`)
+- Improved server management with process trapping for simultaneous servers
+
+### Version 1.2
 - Added fallback to `python3 -m http.server`
 - Added flexible network interface selection (or interactive prompt)
 - Added command-line argument parsing (`-i`, `-p`)

