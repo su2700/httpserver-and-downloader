@@ -322,14 +322,20 @@ start_https() {
 }
 
 start_smb() {
-  if command -v impacket-smbserver >/dev/null 2>&1; then
-    echo "Starting impacket-smbserver (share: share, user: smbuser, pass: smbpass)"
-    impacket-smbserver share "$(pwd)" -smb2support -username smbuser -password smbpass
-  elif command -v smbserver.py >/dev/null 2>&1; then
-    echo "Starting smbserver.py (share: share, user: smbuser, pass: smbpass)"
-    smbserver.py share "$(pwd)" -smb2support -username smbuser -password smbpass
+  local smb_cmd=""
+  if command -v smbserver.py >/dev/null 2>&1 && smbserver.py -h >/dev/null 2>&1; then
+    smb_cmd="smbserver.py"
+  elif command -v impacket-smbserver >/dev/null 2>&1 && impacket-smbserver -h >/dev/null 2>&1; then
+    smb_cmd="impacket-smbserver"
+  elif [[ -f "/usr/share/doc/python3-impacket/examples/smbserver.py" ]] && /usr/bin/python3 -c "import impacket" >/dev/null 2>&1; then
+    smb_cmd="/usr/bin/python3 /usr/share/doc/python3-impacket/examples/smbserver.py"
+  fi
+
+  if [[ -n "$smb_cmd" ]]; then
+    echo "Starting SMB server ($smb_cmd) (share: share, user: smbuser, pass: smbpass)"
+    $smb_cmd share "$(pwd)" -smb2support -username smbuser -password smbpass
   else
-    echo "ERROR: 'impacket-smbserver' not found. (pip install impacket)"
+    echo "ERROR: 'impacket-smbserver' or 'smbserver.py' not found or not working. (pip install impacket)"
     return 1
   fi
 }
