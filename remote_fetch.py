@@ -21,17 +21,27 @@ G  = "\033[0;32m"
 Y  = "\033[1;33m"
 B  = "\033[0;34m"
 C  = "\033[0;36m"
+M  = "\033[0;35m"
+W  = "\033[0;37m"
+# Bright variants
+BR = "\033[1;31m"
+BG = "\033[1;32m"
+BY = "\033[1;33m"
+BB = "\033[1;34m"
+BM = "\033[1;35m"
+BC = "\033[1;36m"
 BO = "\033[1m"
+DIM = "\033[2m"
 NC = "\033[0m"
 
-BANNER = f"""{BO}{C}
+BANNER = f"""{BO}{BC}
   ____                      _       _____    _       _
  |  _ \\ ___ _ __ ___   ___ | |_ ___|  ___|__| |_ ___| |__
  | |_) / _ \\ '_ ` _ \\ / _ \\| __/ _ \\ |_ / _ \\ __/ __| '_ \\
  |  _ <  __/ | | | | | (_) | ||  __/  _|  __/ || (__| | | |
  |_| \\_\\___|_| |_| |_|\\___/ \\__\\___|_|  \\___|\\__\\___|_| |_|
-{NC}{B}  Generate remote-serve + local-download command pairs{NC}
-  Companion to {G}serve_local.sh{NC} | CTF / Pentest helper
+{NC}{BM}  Generate remote-serve + local-download command pairs{NC}
+  Companion to {BG}serve_local.sh{NC} | CTF / Pentest helper
 """
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -42,8 +52,8 @@ def url_encode(s: str) -> str:
 
 
 def prompt(label: str, default: str = "") -> str:
-    default_hint = f" [{G}{default}{NC}]" if default else ""
-    sys.stdout.write(f"{Y}👉 {label}{default_hint}: {NC}")
+    default_hint = f" {DIM}[Enter for {BG}{default}{NC}{DIM}]{NC}" if default else ""
+    sys.stdout.write(f"\n{BY}👉 {label}{default_hint}\n{BC}❯ {NC}")
     sys.stdout.flush()
     val = input().strip()
     return val if val else default
@@ -51,24 +61,24 @@ def prompt(label: str, default: str = "") -> str:
 
 def choose(label: str, options: list[tuple[str, str]]) -> str:
     """Show a numbered menu, return the chosen key."""
-    print(f"\n{B}{label}{NC}")
+    print(f"\n{BM}📋 {label}{NC}")
     for i, (key, desc) in enumerate(options, 1):
-        print(f"  [{C}{i}{NC}] {BO}{key}{NC} — {desc}")
+        print(f"  [{BC}{i}{NC}] {BO}{key}{NC} {DIM}— {desc}{NC}")
     while True:
-        sys.stdout.write(f"{Y}👉 Enter number: {NC}")
+        sys.stdout.write(f"\n{BY}👉 Enter number: {NC}")
         sys.stdout.flush()
         raw = input().strip()
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
-        print(f"{R}❌ Invalid. Enter a number between 1 and {len(options)}.{NC}")
+        print(f"{BR}❌ Invalid. Enter a number between 1 and {len(options)}.{NC}")
 
 
 def section(title: str):
     width = 56
-    bar = "=" * width
-    print(f"\n{BO}{B}{'📦 ' + bar}{NC}")
-    print(f"{BO}{B}  {title}{NC}")
-    print(f"{BO}{B}{'  ' + bar}{NC}\n")
+    bar = "═" * width
+    print(f"\n{BC}╔{bar}╗{NC}")
+    print(f"{BC}║{NC}  {BO}{title}{NC}")
+    print(f"{BC}╚{bar}╝{NC}")
 
 
 # ── Command generators ────────────────────────────────────────────────────────
@@ -98,7 +108,10 @@ def remote_serve_commands(remote_os: str, port: int, directory: str) -> list[tup
         cmds += [
             ("Python3 (if installed)",
              f"cd /d {dir_arg} && python -m http.server {port}"),
-            ("PowerShell (native)",
+            ("PowerShell (native, No-Admin)",
+             f"$l=[Net.Sockets.TcpListener]{port};$l.Start();while($true){{$c=$l.AcceptTcpClient();$s=$c.GetStream();$b=New-Object byte[] 1024;$n=$s.Read($b,0,1024);$req=[Text.Encoding]::ASCII.GetString($b,0,$n);$f=Join-Path '{dir_arg}' ($req.Split(' ')[1].TrimStart('/'));if(Test-Path $f){{$data=[IO.File]::ReadAllBytes($f);$h=\"HTTP/1.1 200 OK`r`nContent-Length: $($data.Length)`r`n`r`n\";$hb=[Text.Encoding]::ASCII.GetBytes($h);$s.Write($hb,0,$hb.Length);$s.Write($data,0,$data.Length)}};$c.Close()}}"),
+
+            ("PowerShell (native, Requires Admin)",
              f"cd {dir_arg}; "
              f"$H=new-object Net.HttpListener; $H.Prefixes.Add('http://+:{port}/'); $H.Start(); "
              f"while($H.IsListening){{$ctx=$H.GetContext(); "
@@ -152,16 +165,21 @@ def main():
     args = parse_args()
 
     # ── Gather inputs ──────────────────────────────────────────────────────
-    remote_ip = args.ip or prompt("Remote machine IP / hostname", "")
+    remote_ip = args.ip or prompt("🌐 Remote machine IP / hostname", "")
     if not remote_ip:
-        print(f"{R}🚨 ERROR: IP address is required.{NC}")
+        print(f"{BR}🚨 ERROR: IP address is required.{NC}")
         sys.exit(1)
 
-    port = args.port or int(prompt("Port to host on the remote", "8000") or 8000)
+    while True:
+        port_input = prompt("🚪 Port to host on the remote", "8000")
+        if port_input.isdigit():
+            port = int(port_input)
+            break
+        print(f"{BR}❌ ERROR: Port must be a number (e.g., 8000). You entered: '{port_input}'{NC}")
 
-    remote_filepath = args.file or prompt("Full path to file on remote (e.g. /tmp/secret.txt)", "")
+    remote_filepath = args.file or prompt("📄 Full path to file on remote (e.g. /tmp/secret.txt)", "")
     if not remote_filepath:
-        print(f"{R}🚨 ERROR: File path is required.{NC}")
+        print(f"{BR}🚨 ERROR: File path is required.{NC}")
         sys.exit(1)
 
     # Split path → directory + filename
@@ -175,31 +193,32 @@ def main():
         remote_dir, remote_filename = ".", remote_filepath
 
     remote_os = args.os or choose(
-        "Remote machine OS:",
-        [("linux", "Linux / Unix target"), ("windows", "Windows target")]
+        "Target machine OS:",
+        [("linux", "🐧 Linux / Unix"), ("windows", "🪟 Windows")]
     )
 
     # ── Print: Start server on remote ─────────────────────────────────────
-    section("STEP 1 — Run on the REMOTE machine to start HTTP server")
+    section("STEP 1 — Run on the REMOTE machine")
     serve_cmds = remote_serve_commands(remote_os, port, remote_dir)
-    print(f"  {Y}(Pick whichever tool is available on the remote){NC}\n")
+    print(f"  {DIM}(Pick one based on what is available on the remote target){NC}\n")
     for label, cmd in serve_cmds:
-        print(f"  {BO}{G}▶ {label}{NC}")
-        print(f"    {C}{cmd}{NC}\n")
+        print(f"  {BM}▶ {BO}{label}{NC}")
+        print(f"    {BC}{cmd}{NC}\n")
 
     # ── Print: Download locally ────────────────────────────────────────────
-    section("STEP 2 — Run on YOUR (local) machine to download the file")
+    section("STEP 2 — Run on YOUR (local) machine")
     dl_cmds = local_download_commands(remote_ip, port, remote_filename)
+    print(f"  {DIM}(Pick one to download the file to your current folder){NC}\n")
     for label, cmd in dl_cmds:
-        print(f"  {BO}{G}▶ {label}{NC}")
-        print(f"    {C}{cmd}{NC}\n")
+        print(f"  {BM}▶ {BO}{label}{NC}")
+        print(f"    {BC}{cmd}{NC}\n")
 
     # ── Summary box ────────────────────────────────────────────────────────
-    print(f"{BO}{G}{'─' * 58}{NC}")
-    print(f"  {BO}Remote:{NC}   {Y}{remote_ip}:{port}{NC}")
-    print(f"  {BO}File:{NC}     {Y}{remote_filepath}{NC}")
-    print(f"  {BO}Local save:{NC} {Y}./{remote_filename}{NC}")
-    print(f"{BO}{G}{'─' * 58}{NC}\n")
+    print(f"{BG}{'━' * 58}{NC}")
+    print(f"  {BO}🌐 Remote:{NC}     {BY}{remote_ip}:{port}{NC}")
+    print(f"  {BO}📄 File:{NC}       {BY}{remote_filepath}{NC}")
+    print(f"  {BO}📥 Local save:{NC} {BY}./{remote_filename}{NC}")
+    print(f"{BG}{'━' * 58}{NC}\n")
 
 
 if __name__ == "__main__":
