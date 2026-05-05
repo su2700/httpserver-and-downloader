@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""
+remote_fetch.py
+---------------
+Companion to serve_local.sh for the REVERSE flow:
+  - Generates a command to start an HTTP server on the REMOTE machine.
+  - Generates a command to download the file from remote to LOCAL.
+
+Usage:
+  python3 remote_fetch.py
+  python3 remote_fetch.py --ip 10.10.10.5 --port 8000 --file /tmp/loot.txt --os linux
+"""
+
+import argparse
+import sys
+import urllib.parse
+
+# ── ANSI colours ──────────────────────────────────────────────────────────────
+R  = "\033[0;31m"
+G  = "\033[0;32m"
+Y  = "\033[1;33m"
+B  = "\033[0;34m"
+C  = "\033[0;36m"
+BO = "\033[1m"
+NC = "\033[0m"
+
+BANNER = f"""{BO}{C}
+  ____                      _       _____    _       _
+ |  _ \\ ___ _ __ ___   ___ | |_ ___|  ___|__| |_ ___| |__
+ | |_) / _ \\ '_ ` _ \\ / _ \\| __/ _ \\ |_ / _ \\ __/ __| '_ \\
+ |  _ <  __/ | | | | | (_) | ||  __/  _|  __/ || (__| | | |
+ |_| \\_\\___|_| |_| |_|\\___/ \\__\\___|_|  \\___|\\__\\___|_| |_|
+{NC}{B}  Generate remote-serve + local-download command pairs{NC}
+  Companion to {G}serve_local.sh{NC} | CTF / Pentest helper
+"""
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def url_encode(s: str) -> str:
+    """Minimal URL encoding compatible with curl/wget/certutil."""
+    return s.replace("%", "%25").replace("#", "%23").replace(" ", "%20")
+
+
+def prompt(label: str, default: str = "") -> str:
+    default_hint = f" [{G}{default}{NC}]" if default else ""
+    sys.stdout.write(f"{Y}👉 {label}{default_hint}: {NC}")
+    sys.stdout.flush()
+    val = input().strip()
+    return val if val else default
+
+
+def choose(label: str, options: list[tuple[str, str]]) -> str:
+    """Show a numbered menu, return the chosen key."""
+    print(f"\n{B}{label}{NC}")
+    for i, (key, desc) in enumerate(options, 1):
+        print(f"  [{C}{i}{NC}] {BO}{key}{NC} — {desc}")
+    while True:
+        sys.stdout.write(f"{Y}👉 Enter number: {NC}")
+        sys.stdout.flush()
+        raw = input().strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return options[int(raw) - 1][0]
+        print(f"{R}❌ Invalid. Enter a number between 1 and {len(options)}.{NC}")
+
+
+def section(title: str):
+    width = 56
+    bar = "=" * width
+    print(f"\n{BO}{B}{'📦 ' + bar}{NC}")
+    print(f"{BO}{B}  {title}{NC}")
+    print(f"{BO}{B}{'  ' + bar}{NC}\n")
+
+
+# ── Command generators ────────────────────────────────────────────────────────
+
+def remote_serve_commands(remote_os: str, port: int, directory: str) -> list[tuple[str, str]]:
+    """
+    Returns a list of (label, command) pairs for starting an HTTP server
+    on the remote machine. directory is the folder containing the file.
+    """
+    cmds = []
+    dir_arg = directory if directory else "."
+
+    if remote_os == "linux":
+        cmds += [
+            ("python3 (built-in)",
+             f"cd {dir_arg} && python3 -m http.server {port}"),
+            ("python2 (built-in)",
+             f"cd {dir_arg} && python2 -m SimpleHTTPServer {port}"),
+            ("busybox (minimal Linux)",
+             f"cd {dir_arg} && busybox httpd -f -p {port}"),
+            ("php (if installed)",
+             f"cd {dir_arg} && php -S 0.0.0.0:{port}"),
+            ("ruby (if installed)",
+             f"cd {dir_arg} && ruby -run -e httpd . -p {port}"),
+        ]
+    elif remote_os == "windows":
+        cmds += [
+            ("Python3 (if installed)",
+             f"cd /d {dir_arg} && python -m http.server {port}"),
+            ("PowerShell (native)",
+             f"cd {dir_arg}; "
+             f"$H=new-object Net.HttpListener; $H.Prefixes.Add('http://+:{port}/'); $H.Start(); "
+             f"while($H.IsListening){{$ctx=$H.GetContext(); "
+             f"$f=Join-Path (Get-Location) $ctx.Request.Url.LocalPath.TrimStart('/'); "
+             f"if(Test-Path $f){{$b=[IO.File]::ReadAllBytes($f); "
+             f"$ctx.Response.OutputStream.Write($b,0,$b.Length)}}; "
+             f"$ctx.Response.Close()}}"),
+            ("php (if installed)",
+             f"cd /d {dir_arg} && php -S 0.0.0.0:{port}"),
+        ]
+    return cmds
+
+
+def local_download_commands(remote_ip: str, port: int, filename: str) -> list[tuple[str, str]]:
+    """
+    Returns (label, command) pairs for downloading the file locally.
+    Works on the attacker's Linux machine.
+    """
+    enc = url_encode(filename)
+    url = f"http://{remote_ip}:{port}/{enc}"
+    cmds = [
+        ("wget",
+         f'wget -q --show-progress -O "{filename}" "{url}"'),
+        ("curl",
+         f'curl -fsSL "{url}" -o "{filename}"'),
+        ("curl (verbose / debug)",
+         f'curl -v "{url}" -o "{filename}"'),
+        ("Python3 urllib",
+         f'python3 -c "import urllib.request; urllib.request.urlretrieve(\'{url}\', \'{filename}\')"'),
+    ]
+    return cmds
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Generate remote-serve + local-download command pairs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Run without arguments for interactive mode."
+    )
+    p.add_argument("--ip",   help="Remote machine IP address")
+    p.add_argument("--port", help="Port to serve on (default: 8000)", type=int, default=None)
+    p.add_argument("--file", help="Full path to the file on the remote (e.g. /tmp/loot.txt)")
+    p.add_argument("--os",   help="Remote OS: linux or windows", choices=["linux", "windows"])
+    return p.parse_args()
+
+
+def main():
+    print(BANNER)
+    args = parse_args()
+
+    # ── Gather inputs ──────────────────────────────────────────────────────
+    remote_ip = args.ip or prompt("Remote machine IP / hostname", "")
+    if not remote_ip:
+        print(f"{R}🚨 ERROR: IP address is required.{NC}")
+        sys.exit(1)
+
+    port = args.port or int(prompt("Port to host on the remote", "8000") or 8000)
+
+    remote_filepath = args.file or prompt("Full path to file on remote (e.g. /tmp/secret.txt)", "")
+    if not remote_filepath:
+        print(f"{R}🚨 ERROR: File path is required.{NC}")
+        sys.exit(1)
+
+    # Split path → directory + filename
+    if "/" in remote_filepath:
+        parts = remote_filepath.rsplit("/", 1)
+        remote_dir, remote_filename = (parts[0] or "/"), parts[1]
+    elif "\\" in remote_filepath:
+        parts = remote_filepath.rsplit("\\", 1)
+        remote_dir, remote_filename = (parts[0] or "C:\\"), parts[1]
+    else:
+        remote_dir, remote_filename = ".", remote_filepath
+
+    remote_os = args.os or choose(
+        "Remote machine OS:",
+        [("linux", "Linux / Unix target"), ("windows", "Windows target")]
+    )
+
+    # ── Print: Start server on remote ─────────────────────────────────────
+    section("STEP 1 — Run on the REMOTE machine to start HTTP server")
+    serve_cmds = remote_serve_commands(remote_os, port, remote_dir)
+    print(f"  {Y}(Pick whichever tool is available on the remote){NC}\n")
+    for label, cmd in serve_cmds:
+        print(f"  {BO}{G}▶ {label}{NC}")
+        print(f"    {C}{cmd}{NC}\n")
+
+    # ── Print: Download locally ────────────────────────────────────────────
+    section("STEP 2 — Run on YOUR (local) machine to download the file")
+    dl_cmds = local_download_commands(remote_ip, port, remote_filename)
+    for label, cmd in dl_cmds:
+        print(f"  {BO}{G}▶ {label}{NC}")
+        print(f"    {C}{cmd}{NC}\n")
+
+    # ── Summary box ────────────────────────────────────────────────────────
+    print(f"{BO}{G}{'─' * 58}{NC}")
+    print(f"  {BO}Remote:{NC}   {Y}{remote_ip}:{port}{NC}")
+    print(f"  {BO}File:{NC}     {Y}{remote_filepath}{NC}")
+    print(f"  {BO}Local save:{NC} {Y}./{remote_filename}{NC}")
+    print(f"{BO}{G}{'─' * 58}{NC}\n")
+
+
+if __name__ == "__main__":
+    main()
