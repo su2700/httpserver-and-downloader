@@ -169,7 +169,8 @@ while true; do
   echo -e "  [${CYAN}6${NC}] WebDAV only"
   echo -e "  [${CYAN}7${NC}] DNS (dnscat2) only"
   echo -e "  [${CYAN}8${NC}] Netcat (nc) only"
-  echo -e "  [${CYAN}9${NC}] ${BOLD}ALL Protocols${NC} (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS, NC)"
+  echo -e "  [${CYAN}9${NC}] SCP only"
+  echo -e "  [${CYAN}10${NC}] ${BOLD}ALL Protocols${NC} (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS, NC, SCP)"
   echo -ne "${YELLOW}👉 Enter number to select protocol: ${NC}"
   read proto_selection
   case "$proto_selection" in
@@ -181,11 +182,23 @@ while true; do
     6) PROTOCOL="WebDAV"; break ;;
     7) PROTOCOL="DNS"; break ;;
     8) PROTOCOL="NC"; break ;;
-    9) PROTOCOL="ALL"; break ;;
-    *) echo -e "${RED}❌ Invalid selection. Please enter 1-9.${NC}" ;;
+    9) PROTOCOL="SCP"; break ;;
+    10) PROTOCOL="ALL"; break ;;
+    *) echo -e "${RED}❌ Invalid selection. Please enter 1-10.${NC}" ;;
   esac
 done
 echo -e "${GREEN}✅ Selected Protocol: $PROTOCOL${NC}\n"
+
+# Prompt for SCP username if needed
+SCP_USER="$USER"
+if [[ "$PROTOCOL" == "SCP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  echo -ne "${YELLOW}👉 Enter username for SCP (default: $USER): ${NC}"
+  read input_user
+  if [[ -n "$input_user" ]]; then
+    SCP_USER="$input_user"
+  fi
+  echo -e "${GREEN}✅ Using SCP username: $SCP_USER${NC}\n"
+fi
 
 # Port and privilege checks
 if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
@@ -276,6 +289,10 @@ else
         echo -e "    ${YELLOW}Local (Sender):${NC} nc -lnvp $NC_PORT -q 1 < \"$f\""
         echo -e "    ${YELLOW}Target (Receiver):${NC} nc $LOCAL_IP $NC_PORT > \"$f\""
       fi
+      if [[ "$PROTOCOL" == "SCP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo -e "  ${BLUE}SCP (Secure Copy):${NC}"
+        echo "    scp $SCP_USER@$LOCAL_IP:\"$(pwd)/$f\" ."
+      fi
     elif [[ "$TARGET_OS" == "Windows" ]]; then
       if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (HTTP):${NC}"
@@ -318,6 +335,10 @@ else
         echo -e "  ${BLUE}Netcat (nc):${NC}"
         echo -e "    ${YELLOW}Local (Sender):${NC} nc -lnvp $NC_PORT -q 1 < \"$f\""
         echo -e "    ${YELLOW}Target (Receiver):${NC} nc.exe $LOCAL_IP $NC_PORT > \"$f\""
+      fi
+      if [[ "$PROTOCOL" == "SCP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo -e "  ${BLUE}SCP (Secure Copy):${NC}"
+        echo "    scp.exe $SCP_USER@$LOCAL_IP:\"$(pwd)/$f\" ."
       fi
     fi
   done
@@ -456,6 +477,15 @@ start_nc() {
   done
 }
 
+start_scp() {
+  echo -e "ℹ️  ${CYAN}SCP${NC} is a client-side tool and doesn't require a dedicated server in this script."
+  echo -e "🔑 Ensure your ${BOLD}SSH service${NC} is running locally: ${YELLOW}sudo systemctl start ssh${NC}"
+  echo -e "🚀 Commands have been printed above. Use them on the target machine."
+  # Keep the script running to prevent immediate exit if only SCP is selected
+  echo -e "\n${BLUE}Press Ctrl+C to exit when finished.${NC}"
+  while true; do sleep 1; done
+}
+
 # Pre-check: try to free up ports if fuser is available
 if command -v fuser >/dev/null 2>&1; then
   echo -e "${BLUE}🛠️  Checking and cleaning target ports...${NC}"
@@ -484,6 +514,7 @@ case "$PROTOCOL" in
   WebDAV) start_webdav ;;
   DNS)    start_dns ;;
   NC)     start_nc ;;
+  SCP)    start_scp ;;
   ALL)
     echo -e "${BLUE}🌐 Attempting to start all servers...${NC}"
     (start_http || true) &
