@@ -17,6 +17,7 @@ PORT=80
 HTTPS_PORT=443
 WEBDAV_PORT=8080
 FTP_PORT=21
+NC_PORT=9001
 INTERFACE=""
 VSFTPD_CONF=""
 
@@ -167,7 +168,8 @@ while true; do
   echo -e "  [${CYAN}5${NC}] TFTP only"
   echo -e "  [${CYAN}6${NC}] WebDAV only"
   echo -e "  [${CYAN}7${NC}] DNS (dnscat2) only"
-  echo -e "  [${CYAN}8${NC}] ${BOLD}ALL Protocols${NC} (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS)"
+  echo -e "  [${CYAN}8${NC}] Netcat (nc) only"
+  echo -e "  [${CYAN}9${NC}] ${BOLD}ALL Protocols${NC} (HTTP, HTTPS, SMB, FTP, TFTP, WebDAV, DNS, NC)"
   echo -ne "${YELLOW}👉 Enter number to select protocol: ${NC}"
   read proto_selection
   case "$proto_selection" in
@@ -178,8 +180,9 @@ while true; do
     5) PROTOCOL="TFTP"; break ;;
     6) PROTOCOL="WebDAV"; break ;;
     7) PROTOCOL="DNS"; break ;;
-    8) PROTOCOL="ALL"; break ;;
-    *) echo -e "${RED}❌ Invalid selection. Please enter 1-8.${NC}" ;;
+    8) PROTOCOL="NC"; break ;;
+    9) PROTOCOL="ALL"; break ;;
+    *) echo -e "${RED}❌ Invalid selection. Please enter 1-9.${NC}" ;;
   esac
 done
 echo -e "${GREEN}✅ Selected Protocol: $PROTOCOL${NC}\n"
@@ -206,6 +209,14 @@ if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
     echo -e "${YELLOW}⚠️ WARNING: Port $FTP_PORT is privileged and you are not root.${NC}"
     FTP_PORT=2121
     echo -e "Falling back to port ${GREEN}$FTP_PORT${NC} for FTP."
+  fi
+fi
+
+if [[ "$PROTOCOL" == "NC" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if [[ "$NC_PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
+    echo -e "${YELLOW}⚠️ WARNING: Port $NC_PORT is privileged and you are not root.${NC}"
+    NC_PORT=9001
+    echo -e "Falling back to port ${GREEN}$NC_PORT${NC} for Netcat."
   fi
 fi
 
@@ -260,6 +271,11 @@ else
         echo "    dnscat2 --dns server=$LOCAL_IP,port=53"
         echo "    (In session: download \"$f\")"
       fi
+      if [[ "$PROTOCOL" == "NC" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo -e "  ${BLUE}Netcat (nc):${NC}"
+        echo -e "    ${YELLOW}Local (Sender):${NC} nc -lnvp $NC_PORT -q 1 < \"$f\""
+        echo -e "    ${YELLOW}Target (Receiver):${NC} nc $LOCAL_IP $NC_PORT > \"$f\""
+      fi
     elif [[ "$TARGET_OS" == "Windows" ]]; then
       if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (HTTP):${NC}"
@@ -297,6 +313,11 @@ else
         echo -e "  ${BLUE}Windows (DNS/dnscat2):${NC}"
         echo "    dnscat2.exe --dns server=$LOCAL_IP,port=53"
         echo "    (In session: download \"$f\")"
+      fi
+      if [[ "$PROTOCOL" == "NC" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+        echo -e "  ${BLUE}Netcat (nc):${NC}"
+        echo -e "    ${YELLOW}Local (Sender):${NC} nc -lnvp $NC_PORT -q 1 < \"$f\""
+        echo -e "    ${YELLOW}Target (Receiver):${NC} nc.exe $LOCAL_IP $NC_PORT > \"$f\""
       fi
     fi
   done
@@ -420,6 +441,21 @@ start_dns() {
   fi
 }
 
+start_nc() {
+  if ! command -v nc >/dev/null 2>&1; then
+    echo -e "${RED}🚨 ERROR: 'nc' (netcat) not found in PATH.${NC}"
+    return 1
+  fi
+  for f in "${SELECTED_FILES[@]}"; do
+    echo -e "🟢 Starting ${CYAN}Netcat (nc)${NC} to send ${BOLD}$f${NC} on port ${GREEN}$NC_PORT${NC}"
+    echo -e "${YELLOW}ℹ️  Waiting for connection on port $NC_PORT... (Ctrl+C to skip/exit)${NC}"
+    # Use -q 1 to quit 1 second after EOF (works for traditional nc)
+    # If using openbsd nc, user might need -N instead, but -q 1 is a good default for CTFs
+    nc -lnvp "$NC_PORT" -q 1 < "$f" || true
+    echo -e "${GREEN}✅ Finished sending $f (or connection closed).${NC}"
+  done
+}
+
 # Pre-check: try to free up ports if fuser is available
 if command -v fuser >/dev/null 2>&1; then
   echo -e "${BLUE}🛠️  Checking and cleaning target ports...${NC}"
@@ -431,8 +467,9 @@ if command -v fuser >/dev/null 2>&1; then
     TFTP) fuser -k 69/udp 2>/dev/null || true ;;
     WebDAV) fuser -k "$WEBDAV_PORT/tcp" 2>/dev/null || true ;;
     DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
+    NC)   fuser -k "$NC_PORT/tcp" 2>/dev/null || true ;;
     ALL)
-      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp 2>/dev/null || true
+      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp "$NC_PORT/tcp" 2>/dev/null || true
       ;;
   esac
   sleep 0.5 # Give the OS a moment to release the sockets
@@ -446,6 +483,7 @@ case "$PROTOCOL" in
   TFTP)   start_tftp ;;
   WebDAV) start_webdav ;;
   DNS)    start_dns ;;
+  NC)     start_nc ;;
   ALL)
     echo -e "${BLUE}🌐 Attempting to start all servers...${NC}"
     (start_http || true) &
@@ -454,6 +492,7 @@ case "$PROTOCOL" in
     (start_ftp || true) &
     (start_tftp || true) &
     (start_webdav || true) &
+    (start_nc || true) &
     start_dns || { echo -e "${YELLOW}⚠️ WARNING: Foreground DNS server (dnscat2) could not start or was exited. Waiting for background servers...${NC}"; wait; }
     ;;
 esac
