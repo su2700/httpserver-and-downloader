@@ -1,10 +1,10 @@
-# GEMINI.md - HTTP Server and Downloader
+# GEMINI.md - srvl
 
 This document provides context and instructions for AI agents working within this repository.
 
 ## Project Overview
 
-**HTTP Server and Downloader** is a specialized utility script designed for penetration testing and Capture The Flag (CTF) environments. Its primary goal is to simplify the process of serving local tools and scripts to a target machine via HTTP.
+**srvl** is a specialized utility script designed for penetration testing and Capture The Flag (CTF) environments. Its primary goal is to simplify the process of serving local tools and scripts to a target machine via HTTP and other protocols.
 
 - **Main Component**: `serve_local.sh` (Bash script)
 - **Primary Technology**: Bash, `goshs` (Go-based HTTP server)
@@ -32,7 +32,7 @@ This document provides context and instructions for AI agents working within thi
 - **System-wide command**:
   To run from any directory, create a symlink:
   ```bash
-  sudo ln -s /home/noah/Documents/httpserver-and-downloader/serve_local.sh /usr/local/bin/srvl
+  sudo ln -s "$(pwd)/serve_local.sh" /usr/local/bin/srvl
   ```
 - **Privileges**: Running on privileged ports (< 1024) requires root (`sudo`). If run as a normal user on port 80, the script automatically falls back to port 8000.
 

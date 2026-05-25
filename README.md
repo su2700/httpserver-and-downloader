@@ -1,6 +1,6 @@
-# HTTP Server and Downloader (CTF & Pentest Tool)
+# srvl (CTF & Pentest File Server)
 
-A collection of specialized utility scripts designed for penetration testing and Capture The Flag (CTF) environments. These tools simplify the process of serving local files to a target machine or fetching files from a remote host via multiple protocols.
+A collection of specialized utility scripts designed for penetration testing and Capture The Flag (CTF) environments. `srvl` simplifies the process of serving local files to a target machine or fetching files from a remote host via multiple protocols.
 
 ## 🚀 Overview
 
