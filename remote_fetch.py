@@ -108,7 +108,8 @@ def remote_serve_commands(remote_os: str, port: int, directory: str) -> list[tup
             ("PHP HTTP (if installed)", f"cd /d {dir_arg} && php -S 0.0.0.0:{port}", "http"),
             ("PowerShell HTTP (No-Admin)",
              f"$l=[Net.Sockets.TcpListener]{port};$l.Start();while($true){{$c=$l.AcceptTcpClient();$s=$c.GetStream();$b=New-Object byte[] 1024;$n=$s.Read($b,0,1024);$req=[Text.Encoding]::ASCII.GetString($b,0,$n);$f=Join-Path '{dir_arg}' ($req.Split(' ')[1].TrimStart('/'));if(Test-Path $f){{$data=[IO.File]::ReadAllBytes($f);$h=\"HTTP/1.1 200 OK`r`nContent-Length: $($data.Length)`r`n`r`n\";$hb=[Text.Encoding]::ASCII.GetBytes($h);$s.Write($hb,0,$hb.Length);$s.Write($data,0,$data.Length)}};$c.Close()}}", "http"),
-            ("Netcat (Raw TCP - Fast!)", f"nc.exe -lp {port} < \"$FILE\"", "nc"),
+            ("Netcat (Raw TCP - Fast!)", f"Get-Content \"$FILE\" -Raw | .\\nc64.exe -lp {port}", "nc"),
+            ("Netcat (CMD fallback)", f"cmd /c '.\\nc64.exe -lp {port} < \"$FILE\"'", "nc"),
             ("Native SMB Share (Admin)", f"New-SmbShare -Name 'loot' -Path '{dir_arg}' -FullAccess 'Everyone'", "smb"),
         ]
     return cmds
