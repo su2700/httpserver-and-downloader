@@ -81,8 +81,7 @@ To run these tools from anywhere, you can create symlinks in your `/usr/local/bi
 ```bash
 sudo ln -s "$(pwd)/serve_local.sh" /usr/local/bin/srvl
 sudo ln -s "$(pwd)/serve_local.py" /usr/local/bin/srvp
-sudo ln -s "$(pwd)/remote_fetch.py" /usr/local/bin/fetch
-```
+/```
 
 ---
 
