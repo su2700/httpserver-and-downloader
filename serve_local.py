@@ -113,6 +113,29 @@ def url_encode(s: str) -> str:
 def check_command(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
+
+def is_port_in_use(port: int, is_udp: bool = False, target_ip: str = "0.0.0.0") -> bool:
+    sock_type = socket.SOCK_DGRAM if is_udp else socket.SOCK_STREAM
+    for host in ["0.0.0.0", target_ip]:
+        if not host:
+            continue
+        try:
+            s = socket.socket(socket.AF_INET, sock_type)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            s.close()
+        except OSError:
+            return True
+    return False
+
+
+def find_free_port(start_port: int, is_udp: bool = False, target_ip: str = "0.0.0.0") -> int:
+    port = start_port
+    while is_port_in_use(port, is_udp=is_udp, target_ip=target_ip):
+        port += 1
+    return port
+
+
 # ── Logic ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -212,6 +235,19 @@ def main():
         if ports['FTP'] < 1024: ports['FTP'] = 2121
         if ports['NC'] < 1024: ports['NC'] = 9001
         print(f"  - HTTP: {ports['HTTP']}\n  - HTTPS: {ports['HTTPS']}\n  - FTP: {ports['FTP']}\n  - NC: {ports['NC']}")
+
+    # Auto-resolve port conflicts before generating commands
+    for proto_key in ['HTTP', 'HTTPS', 'FTP', 'NC', 'WEBDAV']:
+        if is_port_in_use(ports[proto_key], is_udp=False, target_ip=local_ip):
+            old = ports[proto_key]
+            ports[proto_key] = find_free_port(ports[proto_key] + 1, is_udp=False, target_ip=local_ip)
+            print(f"{BY}⚠️ Port {old} in use for {proto_key}. Auto-switching to free port {ports[proto_key]}.{NC_COLOR}")
+
+    if is_port_in_use(ports['SMB'], is_udp=False, target_ip=local_ip) or is_port_in_use(139, is_udp=False, target_ip=local_ip):
+        old = ports['SMB']
+        ports['SMB'] = find_free_port(4455, is_udp=False, target_ip=local_ip)
+        print(f"{BY}⚠️ SMB port {old}/139 in use. Auto-switching SMB server to port {ports['SMB']}.{NC_COLOR}")
+
 
     # 7. Generate Commands
     section("🚀 DOWNLOAD COMMANDS")
@@ -328,10 +364,10 @@ def main():
             smb_cmd = None
             for cmd in ["impacket-smbserver", "smbserver.py"]:
                 if check_command(cmd):
-                    smb_cmd = [cmd, "-smb2support", "share", os.getcwd(), "-username", "smbuser", "-password", "smbpass"]
+                    smb_cmd = [cmd, "-smb2support", "share", os.getcwd(), "-username", "smbuser", "-password", "smbpass", "-ip", local_ip, "-port", str(ports['SMB'])]
                     break
             if smb_cmd:
-                print(f"{BG}🟢 Starting SMB server (share: share, user: smbuser, pass: smbpass)...{NC_COLOR}")
+                print(f"{BG}🟢 Starting SMB server on port {ports['SMB']} (share: share, user: smbuser, pass: smbpass)...{NC_COLOR}")
                 processes.append(subprocess.Popen(smb_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             else:
                 print(f"{BR}❌ ERROR: 'impacket-smbserver' not found.{NC_COLOR}")
@@ -341,7 +377,7 @@ def main():
             pyftpdlib_check = subprocess.run([sys.executable, "-m", "pyftpdlib", "--help"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if pyftpdlib_check.returncode == 0:
                  print(f"{BG}🟢 Starting python3 pyftpdlib on port {ports['FTP']}...{NC_COLOR}")
-                 processes.append(subprocess.Popen([sys.executable, "-m", "pyftpdlib", "-p", str(ports['FTP']), "-d", os.getcwd(), "-u", "anonymous", "-P", ""], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                 processes.append(subprocess.Popen([sys.executable, "-m", "pyftpdlib", "-p", str(ports['FTP']), "-d", os.getcwd()], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
             elif check_command("vsftpd"):
                 print(f"{BG}🟢 Starting vsftpd (Note: requires manual config in this version)...{NC_COLOR}")
             else:
